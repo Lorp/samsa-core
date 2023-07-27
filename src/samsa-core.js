@@ -4629,17 +4629,6 @@ const RENDERERS = {
 */
 
 
-// exports
-// - works in node
-// module.exports = {
-// 	SamsaFont: SamsaFont,
-// 	SamsaInstance: SamsaInstance,
-// 	SamsaGlyph: SamsaGlyph,
-// 	SamsaContext: SamsaContext,
-// 	SamsaBuffer: SamsaBuffer,
-// 	SAMSAGLOBAL: SAMSAGLOBAL,
-// };
-
 // - works in browser and node
 export { SamsaFont, SamsaInstance, SamsaGlyph, SamsaContext, SamsaBuffer, SAMSAGLOBAL};
 
