@@ -12,6 +12,6 @@ This repo is for Version 2 development. Version 1 is managed in the [Samsa GUI](
 
 ## In use
 
-* [RenderStack](https://lorp.github.io/renderstack/dist/)
-* [CodePen: samsa-core v2 demo](https://codepen.io/lorp/pen/LYXgZdr)
-* [Samsa-GUI](https://lorp.github.io/samsa/src/samsa-gui.html) (uses Version 1, upgrade planned)
+* [samsa-core v2 demo](https://codepen.io/lorp/pen/LYXgZdr) (CodePen)
+* [RenderStack](https://lorp.github.io/renderstack/dist/) ([repo](https://github.com/Lorp/renderstack))
+* [Samsa-GUI](https://lorp.github.io/samsa/src/samsa-gui.html) ([repo](https://github.com/Lorp/samsa), uses Version 1, upgrade planned)
