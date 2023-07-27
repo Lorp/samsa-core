@@ -1,5 +1,12 @@
 # samsa-core
-Library for processing TrueType font files. Includes variations, COLR, and SVG generation.
+Library for processing TrueType font files.
+
+Features:
+
+* variations
+* avar1 and avar2
+* COLRv0 and COLRv1
+* SVG generation
 
 This repo is for Version 2 development. Version 1 is managed in the [Samsa GUI](https://github.com/Lorp/samsa) repo.
 
