@@ -20,6 +20,7 @@ accurately reflect fields described in the spec, derive some data from flags, th
 
 // expose these to the client
 const SAMSAGLOBAL = {
+	version: "2.0.0",
 	browser: typeof window !== "undefined",
 	endianness: endianness(),
 	littleendian: endianness("LE"),
