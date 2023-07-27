@@ -1,5 +1,5 @@
 {
-  "name": "samsa-font",
+  "name": "samsa-core",
   "version": "2.0.0",
   "main": "index.js",
   "author": "Laurence Penney <lorp@lorp.org>",
