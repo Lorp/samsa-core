@@ -15,6 +15,7 @@ const runCount = _runCount & 0x7FFF; // refine the data into a useable variable
 The underscore prefix is intended to mean the initial version of the variable (_runCount) that needs to be refined into a useable variable (runCount). This way we can 
 accurately reflect fields described in the spec, derive some data from flags, then use them under similar name for the purpose decribed by the name.
 
+2023-07-27: All occurrences of "??" nullish coalescing operator have been replaced (it’s not supported by something in the Figma plugin build process). The ?? lines remain as comments above their replacements.
 
 */
 
@@ -1654,7 +1655,8 @@ class SamsaBuffer extends DataView {
 
 	decodeGlyph(options={}) {
 		
-		const metrics = options.metrics ?? [0, 0, 0, 0];
+		//const metrics = options.metrics ?? [0, 0, 0, 0];
+		const metrics = options.metrics === undefined ? [0, 0, 0, 0] : options.metrics;
 		const glyph = options.length ? new SamsaGlyph(this.decode(FORMATS.GlyphHeader)) : new SamsaGlyph();
 		if (options.id)
 			glyph.id = options.id;
@@ -1772,10 +1774,14 @@ class SamsaBuffer extends DataView {
 		}
 
 		// TODO: fix the metrics points
-		glyph.points[glyph.numPoints]   = [metrics[0] ?? 0,               0, 0]; // H: Left side bearing point
-		glyph.points[glyph.numPoints+1] = [metrics[1] ?? 0,               0, 0]; // H: Right side bearing point
-		glyph.points[glyph.numPoints+2] = [              0, metrics[2] ?? 0, 0]; // V: Top side bearing point
-		glyph.points[glyph.numPoints+3] = [              0, metrics[3] ?? 0, 0]; // V: Bottom side bearing point
+		// glyph.points[glyph.numPoints]   = [metrics[0] ?? 0,               0, 0]; // H: Left side bearing point
+		// glyph.points[glyph.numPoints+1] = [metrics[1] ?? 0,               0, 0]; // H: Right side bearing point
+		// glyph.points[glyph.numPoints+2] = [              0, metrics[2] ?? 0, 0]; // V: Top side bearing point
+		// glyph.points[glyph.numPoints+3] = [              0, metrics[3] ?? 0, 0]; // V: Bottom side bearing point
+		glyph.points[glyph.numPoints]   = [metrics[0] ? metrics[0] : 0,               0, 0]; // H: Left side bearing point
+		glyph.points[glyph.numPoints+1] = [metrics[1] ? metrics[1] : 0,               0, 0]; // H: Right side bearing point
+		glyph.points[glyph.numPoints+2] = [              0, metrics[2] ? metrics[2] : 0, 0]; // V: Top side bearing point
+		glyph.points[glyph.numPoints+3] = [              0, metrics[3] ? metrics[3] : 0, 0]; // V: Bottom side bearing point
 	
 		return glyph;
 	}
@@ -2972,7 +2978,8 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 	switch (characterMap.format) {
 
 		case 1: {
-			g = characterMap.mapping(uni) ?? 0;
+			//g = characterMap.mapping(uni) ?? 0;
+			g = characterMap.mapping(uni) ? characterMap.mapping(uni) : 0;
 			break;
 		}
 
@@ -4231,7 +4238,8 @@ SamsaGlyph.prototype.svgGlyphCOLRv0 = function (context={}) { // we need to poss
 		const buf = font.bufferFromTable("COLR");
 		const colr = font.COLR;
 		const cpal = font.CPAL;
-		const defaultColor = context.color ?? 0x000000ff; // default color // allows 0x000000000 (a valid transparent color)
+		//const defaultColor = context.color ?? 0x000000ff; // default color // allows 0x000000000 (a valid transparent color)
+		const defaultColor = context.color === undefined ? 0x000000ff : context.color; // default color // allows 0x000000000 (a valid transparent color)
 		const palette = cpal.palettes[context.paletteId || 0];
 		let paths = "";
 		for (let i=0; i<numLayers; i++) {
