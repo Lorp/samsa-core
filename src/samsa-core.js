@@ -2808,9 +2808,7 @@ function SamsaFont(buf, options = {}) {
 
 	// options.allGlyphs: load all glyphs
 	if (options.allGlyphs) {
-		let start, end;
 		let offset = 0;
-		start = performance.now();
 		// we should do this differently if the font is only lightly loaded, e.g. from a big file that we don’t want to load in full
 		for (let g=0; g<this.maxp.numGlyphs; g++) {
 			this.buf.seek(this.tables.loca.offset + (g+1) * (this.head.indexToLocFormat ? 4 : 2));
@@ -2819,13 +2817,11 @@ function SamsaFont(buf, options = {}) {
 			this.glyphs[g] = buf.decodeGlyph({id: g, font: this, length: nextOffset - offset});
 			offset = nextOffset;
 		}
-		end = performance.now();
 
 		// options.allTVTs: load all TVTs?
 		if (options.allTVTs && this.gvar) {
 			const gvar = this.gvar;
 			const gvarBuf = this.bufferFromTable("gvar");
-			start = performance.now();
 			for (let g=0; g<this.maxp.numGlyphs; g++) {
 
 				if (!this.glyphs[g].font)
@@ -2839,8 +2835,6 @@ function SamsaFont(buf, options = {}) {
 					this.glyphs[g].tvts = [];
 				}
 			}
-			end = performance.now();
-			console.log(`${this.glyphs.length} TVTs loaded in ` + (end - start) + " ms");	
 		}
 	}
 }
