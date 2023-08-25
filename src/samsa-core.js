@@ -546,12 +546,13 @@ const TABLE_DECODERS = {
 				buf.seek(font.avar.axisIndexMapOffset);
 				font.avar.axisIndexMap = buf.decodeIndexMap();
 			}
-			// else we must use implicit mappings later			
+			// else we must use implicit mappings later
 		}
 	},
 
 	"cmap": (font, buf) => {
 		// https://learn.microsoft.com/en-us/typography/opentype/spec/cmap
+		// - this function works in step with SamsaFont.prototype.glyphIdFromUnicode()
 		const cmap = font.cmap;
 		cmap.lookup = []; // the main cmap lookup table
 		cmap.encodingRecords = [];
@@ -751,8 +752,12 @@ const TABLE_DECODERS = {
 			gvar.sharedTuples.push(tuple);
 		}
 
-		// // This is good, I think! But let’s try it only when we are happy with other stuff
-		// // - we can also use getVariationScalar() (singular) or why not getVariationScalars() plural...?
+		// Experimental code, intended to precalculate the scalars for the sharedTuples
+		// - the issue is that, occasionally (as in Bitter), some sharedTuples are intermediate so need their start and end explicitly read from the TVT for each glyph
+		// - the intermediate sharedTuples cannot be precalculated
+		// - the logic needs to be that IF the peak tuple is shared AND the tuple is non-intermediate, THEN we can precalculate the scalar
+		// - that is equivalent to checking that flag & 0xC000 == 0
+		// 
 		// this.gvar.sharedRegions = [];
 		// buf.seek(this.tables["gvar"].offset + this.gvar.sharedTuplesOffset);
 		// for (let t=0; t < this.gvar.sharedTupleCount; t++) {
@@ -771,7 +776,6 @@ const TABLE_DECODERS = {
 		// 	}
 		// 	this.gvar.sharedRegions.push(region);
 		// }
-		// Hmm, it’s not that great, actually, since it’s always peaks only at extremes; on instantiation we just need to calculate a scalar for each tuple
 
 		// get tupleOffsets array (TODO: we could get these offsets JIT)
 		buf.seek(20);
@@ -2890,32 +2894,6 @@ SamsaFont.prototype.itemVariationStoreInstantiate = function (ivs, tuple) {
 
 }
 
-SamsaFont.prototype.getVariationScalar = function (region, axisCount=this.fvar.axisCount) {
-	let S = 1; // S will end up in the range [0, 1]
-	for (let a=0; a < axisCount; a++) {
-		const [start, peak, end] = region[a]; // region[a] is a linearRegion
-		if (peak !== 0) { // does the linearRegion participate in the calculation?
-			const v = tuple[a]; // v is the a’th normalized axis value from the tuple
-			if (v == 0) {
-				S = 0;
-				break; // zero scalar, which makes S=0, so quit loop (maybe this is more common than the v==peak case, so should be tested first)
-			}
-			else if (v !== peak) { // we could let the v==peak case fall through, but it’s common so worth testing first
-				const vMstart = v - start, vMend = v - end; // precalculating these speeds things up a bit
-				if (vMstart < 0 || vMend > 0) {
-					S = 0;
-					break; // zero scalar, which makes S=0, so quit loop (maybe this is more common than the v==peak case, so should be tested first)
-				}
-				else if (v < peak)
-					S *= vMstart / (peak - start);
-				else // if (v > peak) // because we already tested all other possibilities (including v==peak) we can remove this test and just have "else"
-					S *= vMend / (peak - end);
-			}
-		}
-	}
-	return S;
-}
-	
 // process ItemVariationStore to get scalars for an instance (including avar2)
 // - the returned scalars[n] array contains a scalar for each region (therefore regions.length == scalars.length)
 //SamsaFont.prototype.getVariationScalars = function (regions, tuple) {
