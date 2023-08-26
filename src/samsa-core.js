@@ -2858,6 +2858,9 @@ SamsaFont.prototype.bufferFromTable = function (tag) {
 	return new SamsaBuffer(this.buf.buffer, this.tables[tag].offset, this.tables[tag].length);
 }
 
+
+// given an ivs and a tuple, returns a 2d array of values that need to be added to the items they apply to
+// - although delta values are always integers, interpolated deltas are in general floating point
 SamsaFont.prototype.itemVariationStoreInstantiate = function (ivs, tuple) {
 	const scalars = this.getVariationScalars(ivs, tuple); // get the region scalars: we get this only ONCE per instance
 	const interpolatedDeltas = []; // a 2d array made of (ivd.deltaSets.length) arrays of interpolated delta values
@@ -2869,29 +2872,7 @@ SamsaFont.prototype.itemVariationStoreInstantiate = function (ivs, tuple) {
 			interpolatedDeltas[i].push(d);
 		});
 	});
-	return interpolatedDeltas; // 2d array of values that need to be added to the items they apply to
-	// although delta values are always integers, the interpolated deltas will now be floating point (in general)
-	// HMM, shouldn’t the list of deltas per item collapse to a single item?
-	// THUS:
-
-	/*
-	const scalars = this.getVariationScalars(ivs, tuple); // get the region scalars: we get this only ONCE per instance
-	const interpolatedDeltas = []; // a 2d array made of (ivd.deltaSets.length) arrays of interpolated delta values
-	ivs.ivds.forEach((ivd, i) => {
-		interpolatedDeltas[i] = 0;
-		ivd.deltaSets.forEach(deltaSet => {
-			let d = 0;
-			deltaSet.forEach((delta, r) => d += scalars[ivd.regionIds[r]] * delta); // this is where the good stuff happens!
-			interpolatedDeltas[i] += d;
-			// could we do the above with a reduce? and maybe the enclosing thing in another reduce?
-		});
-	});
-	return interpolatedDeltas; // 2d array of values that need to be added to the items they apply to
-
-	// HMM, maybe not... the inner/outer thing is essential to keep
-	*/
-
-
+	return interpolatedDeltas;
 }
 
 // process ItemVariationStore to get scalars for an instance (including avar2)
