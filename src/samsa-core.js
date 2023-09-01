@@ -2637,7 +2637,8 @@ class SamsaBuffer extends DataView {
 					paint.points = [ [operands[0], operands[1]], [operands[2], operands[3]], [operands[4], operands[5]] ];
 				}
 				else if (paint.format < 8) { // PaintRadialGradient, PaintVarRadialGradient
-					paint.points = [ [operands[0], operands[1], operands[2]], [operands[3], operands[4], operands[5]] ];
+					paint.points = [ [operands[0], operands[1]], [operands[3], operands[4] ] ];
+					paint.radii = [ operands[2], operands[5] ];
 				}
 				else { // PaintSweepGradient, PaintVarSweepGradient
 					paint.center = [operands[0], operands[1]];
@@ -2984,23 +2985,14 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 // - these don’t use the font at all, but it’s a way to get them exported
 SamsaFont.prototype.linearGradientFromThreePoints = function (points) {
 	const
-		p0x = points[0][0],
-		p0y = points[0][1],
-		p1x = points[1][0],
-		p1y = points[1][1],
-		p2x = points[2][0],
-		p2y = points[2][1],
-		d1x = p1x - p0x,
-		d1y = p1y - p0y,
-		d2x = p2x - p0x,
-		d2y = p2y - p0y,
-		dotProd = d1x*d2x + d1y*d2y,
-		rotLengthSquared = d2x*d2x + d2y*d2y,
-		magnitude = dotProd / rotLengthSquared,
-		finalX = p1x - magnitude * d2x,
-		finalY = p1y - magnitude * d2y;
+		[p0, p1, p2] = points,
+		d1 = [p1[0] - p0[0], p1[1] - p0[1]],
+		d2 = [p2[0] - p0[0], p2[1] - p0[1]],
+		dotProd = d1[0] * d2[0] + d1[1] * d2[1],
+		rotLengthSquared = d2[0] * d2[0] + d2[1] * d2[1],
+		magnitude = dotProd / rotLengthSquared;
 
-	return [finalX, finalY];
+	return [p1[0] - magnitude * d2[0], p1[1] - magnitude * d2[1]];
 }
 
 SamsaFont.prototype.hexColorFromU32 = function (num) {
@@ -4077,67 +4069,12 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 		}
 
 		case PAINT_COMPOSE: {
+
 			switch (paint.format) {
 				case 2: case 3: { // PaintSolid
 					const paletteIndex = paint.paletteIndex;
 					const color = paletteIndex == 0xffff ? context.color : palette.colors[paletteIndex];
 					svg += `<use x="0" y="0" href="#g${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}" />`; // maybe update these x and y later
-					break;
-				}
-
-				case 4: case 5: { // PaintLinearGradient
-					if (!context.gradients[paint.offset]) { // if we have not already stored this paint in this glyph run
-
-						// calculate the gradient line (p0x,p0y)..(finalX, finalY) from the 3 points by determining the projection vector via the dot product
-						const
-							p0x = paint.points[0][0],
-							p0y = paint.points[0][1],
-							p1x = paint.points[1][0],
-							p1y = paint.points[1][1],
-							p2x = paint.points[2][0],
-							p2y = paint.points[2][1],
-							d1x = p1x - p0x,
-							d1y = p1y - p0y,
-							d2x = p2x - p0x,
-							d2y = p2y - p0y,
-							dotProduct = d1x*d2x + d1y*d2y,
-							rotLengthSquared = d2x*d2x + d2y*d2y,
-							magnitude = dotProduct / rotLengthSquared,
-							finalX = p1x - magnitude * d2x,
-							finalY = p1y - magnitude * d2y;
-
-						const attrs = {
-							id: "f" + paint.offset,
-							x1: p0x,
-							y1: p0y,
-							x2: finalX,
-							y2: finalY,
-							gradientUnits: "userSpaceOnUse",
-							spreadMethod : paint.colorLine.extend ? extendModes[paint.colorLine.extend] : undefined, // we could allow "pad" here, but instead we ignore EXTEND_PAD (0) since it is default behaviour
-						};
-						let gradient = `<linearGradient${expandAttrs(attrs)}>`;
-						paint.colorLine.colorStops.forEach(colorStop => {
-							const paletteIndex = colorStop.paletteIndex;
-							const color = paletteIndex == 0xffff ? context.color : palette.colors[paletteIndex];
-							gradient += `<stop offset="${colorStop.stopOffset*100}%" stop-color="${font.hexColorFromU32(color)}"/>`;
-						});
-						gradient += `</linearGradient>`;
-						context.gradients[paint.offset] = gradient; // paint.offset is gradientId
-					}
-					svg += `<use href="#g${context.lastGlyphId}" fill="url(#f${paint.offset})" />`; // we have x and y attributes available here, but we use the enclosing <g> instead
-					// lastGlyphId is not satisfactory, since we may have several consecutive format 10 tables defining a clip path (in practice this seems uncommon)
-					break;
-				}
-
-				case 6: case 7: { // PaintRadialGradient, PaintVarRadialGradient
-					console.error("PaintRadialGradient not implemented yet");
-					console.log(paint);
-					break;
-				}
-
-				case 8: case 9: { // PaintSweepGradient, PaintVarSweepGradient
-					console.error("PaintSweepGradient not implemented yet");
-					console.log(paint);
 					break;
 				}
 
@@ -4184,8 +4121,66 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 					}
 					break;
 				}
+
+				default: {
+
+					// all other paint.formats are gradients, which can be handled together
+					if (!context.gradients[paint.offset]) { // if we have not already stored this paint in this glyph run
+
+						// set the initial attributes of the <linearGradient> or <radialGradient> element (we set more specific attributes later)
+						const attrs = {
+							id: "f" + paint.offset,
+							gradientUnits: "userSpaceOnUse",
+							spreadMethod: paint.colorLine.extend ? extendModes[paint.colorLine.extend] : undefined, // we could allow "pad" here, but instead we ignore EXTEND_PAD (0) since it is default behaviour
+						};
+
+						// get the colorLine stops for all gradient types
+						let stops = "";
+						let gradientElement;
+						paint.colorLine.colorStops.forEach(colorStop => {
+							const color = colorStop.paletteIndex == 0xffff ? context.color : palette.colors[colorStop.paletteIndex];
+							stops += `<stop offset="${colorStop.stopOffset*100}%" stop-color="${font.hexColorFromU32(color)}"/>`;
+						});
+						
+						// PaintLinearGradient (4), PaintVarLinearGradient (5)
+						// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/linearGradient
+						if (paint.format < 6) {
+							[attrs.x1, attrs.y1] = paint.points[0];
+							[attrs.x2, attrs.y2] = font.linearGradientFromThreePoints(paint.points);
+							gradientElement = "linearGradient";
+						}
+
+						// PaintRadialGradient (6), PaintVarRadialGradient (7)
+						// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/radialGradient
+						else if (paint.format < 8) {
+							[attrs.fx, attrs.fy] = paint.points[0];
+							[attrs.cx, attrs.cy] = paint.points[1];
+							attrs.fr = paint.radii[0];
+							attrs.r = paint.radii[1];
+							gradientElement = "radialGradient";
+						}
+
+						// PaintSweepGradient (8), PaintVarSweepGradient (9)
+						else {
+							console.error("PaintSweepGradient is not implemented yet");
+							console.log(paint);
+							// paint.center
+							// paint.startAngle
+							// paint.endAngle
+							gradientElement = "sweepGradient"; // invalid SVG, but at least will not break the output
+						}
+
+						context.gradients[paint.offset] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;; // paint.offset is gradientId
+						svg += `<use href="#g${context.lastGlyphId}" fill="url(#f${paint.offset})" />`;
+						console.log("paint.format almost done", paint.format);
+					}
+				}
+
+				// declare which glyph outline we are using
+				// - lastGlyphId is not satisfactory, since we may have several consecutive format 10 tables defining a clip path (in practice this seems uncommon)
+				svg += `<use href="#g${context.lastGlyphId}" fill="url(#f${paint.offset})" />`;
+				break;
 			}
-			break;
 		}
 	}
 	
