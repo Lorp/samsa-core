@@ -436,36 +436,6 @@ const DELTAS_ARE_ZERO = 0x80;
 const DELTAS_ARE_WORDS = 0x40;
 const DELTA_RUN_COUNT_MASK = 0x3f;
 
-// COLRv1 composite modes
-const COMPOSITE_CLEAR = 0;
-const COMPOSITE_SRC = 1;
-const COMPOSITE_DEST = 2;
-const COMPOSITE_SRC_OVER = 3;
-const COMPOSITE_DEST_OVER = 4;
-const COMPOSITE_SRC_IN = 5;
-const COMPOSITE_DEST_IN = 6;
-const COMPOSITE_SRC_OUT = 7;
-const COMPOSITE_DEST_OUT = 8;
-const COMPOSITE_SRC_ATOP = 9;
-const COMPOSITE_DEST_ATOP = 10;
-const COMPOSITE_XOR = 11;
-const COMPOSITE_PLUS = 12;
-const COMPOSITE_SCREEN = 13;
-const COMPOSITE_OVERLAY = 14;
-const COMPOSITE_DARKEN = 15;
-const COMPOSITE_LIGHTEN = 16;
-const COMPOSITE_COLOR_DODGE = 17;
-const COMPOSITE_COLOR_BURN = 18;
-const COMPOSITE_HARD_LIGHT = 19;
-const COMPOSITE_SOFT_LIGHT = 20;
-const COMPOSITE_DIFFERENCE = 21;
-const COMPOSITE_EXCLUSION = 22;
-const COMPOSITE_MULTIPLY = 23;
-const COMPOSITE_HSL_HUE = 24;
-const COMPOSITE_HSL_SATURATION = 25;
-const COMPOSITE_HSL_COLOR = 26;
-const COMPOSITE_HSL_LUMINOSITY = 27;
-
 // COLRv1 paint types (multiple formats have the same type)
 const PAINT_LAYERS = 1;
 const PAINT_SHAPE = 2;
@@ -516,6 +486,38 @@ const PAINT_VAR_OPERANDS = [0,0,1,1,6,6,6,6,4,4,0,0,6,6,2,2,2,2,4,4,1,1,3,3,1,1,
 const EXTEND_PAD = 0;
 const EXTEND_REPEAT = 1;
 const EXTEND_REFLECT = 2;
+
+// COLRv1 PaintComposite modes
+const PAINTCOMPOSITE_MODES = [
+	["-", "clear"], // COMPOSITE_CLEAR
+	["-", "src"], // COMPOSITE_SRC
+	["-", "dest"], // COMPOSITE_DEST
+	["F", "over"], // COMPOSITE_SRC_OVER
+	["F", "over"], // COMPOSITE_DEST_OVER
+	["F", "in"], // COMPOSITE_SRC_IN
+	["F", "in"], // COMPOSITE_DEST_IN
+	["F", "out"], // COMPOSITE_SRC_OUT
+	["F", "out"], // COMPOSITE_DEST_OUT
+	["F", "atop"], // COMPOSITE_SRC_ATOP
+	["F", "atop"], // COMPOSITE_DEST_ATOP
+	["F", "xor"], // COMPOSITE_XOR
+	["F", "lighter"], // COMPOSITE_PLUS (sic)
+	["M", "screen"], // COMPOSITE_SCREEN
+	["M", "overlay"], // COMPOSITE_OVERLAY
+	["M", "darken"], // COMPOSITE_DARKEN
+	["M", "lighten"], // COMPOSITE_LIGHTEN
+	["M", "color-dodge"], // COMPOSITE_COLOR_DODGE
+	["M", "color-burn"], // COMPOSITE_COLOR_BURN
+	["M", "hard-light"], // COMPOSITE_HARD_LIGHT
+	["M", "soft-light"], // COMPOSITE_SOFT_LIGHT
+	["M", "difference"], // COMPOSITE_DIFFERENCE
+	["M", "exclusion"], // COMPOSITE_EXCLUSION
+	["M", "multiply"], // COMPOSITE_MULTIPLY
+	["M", "hue"], // COMPOSITE_HSL_HUE
+	["M", "saturation"], // COMPOSITE_HSL_SATURATION
+	["M", "color"], // COMPOSITE_HSL_COLOR
+	["M", "luminosity"], // COMPOSITE_HSL_LUMINOSITY
+  ];
 
 
 // table decoders are called *after* the first part has been decoded using the FORMATS[<tableTag>] definition
@@ -3930,14 +3932,10 @@ SamsaGlyph.prototype.paint = function (context={}) {
 	else {
 		const font = this.font;
 		const buf = font.bufferFromTable("COLR");
-		const colr = font.COLR;
-		const cpal = font.CPAL;
-		const gradients = context.gradients;
-		const palette = cpal.palettes[context.paletteId || 0];
 
 		if (context.color === undefined) context.color = 0x000000ff;
 		if (!context.rendering) context.rendering = {};
-		if (!context.gradients) context.gradients = {};
+		if (!context.defs) context.defs = {};
 		if (!context.font) context.font = font;
 		if (!context.rendering) context.rendering = {};
 		context.paintIds = []; // keep track of the paint IDs we’ve used (must be reset for each glyph): we 
@@ -3956,11 +3954,12 @@ SamsaGlyph.prototype.paint = function (context={}) {
 // - context (required) contains:
 //   .font, a reference to the SamsaFont object
 //   .color, the foreground color being used in U32 format (optional, default is 0x000000ff)
-//   .paths, object to cache the monochrome glyph outlines used in the text run, indexed by glyphId
-//   .gradients, object to cache the gradients used, indexed by gradientId
+//   .defs, object to cache repeatable items in the text run:
+//       - the monochrome glyph paths, identitied by p<glyphId>
+//       - the gradients, identified by g<gradientId> where gradientId is actually the paint offset where the gradient definition starts
 // - the function does not make use of the SamsaGlyph object at all, it’s just convenient for export
 // - the main switch statement selects between the 4 paint types; paint types group paint formats together, and are stored in PAINT_TYPES; PAINT_COMPOSE is the only non-recursive paint type (paint format=32 is a special case which needs to recurse 2 paint trees before the compose operation)
-// - the result of a paintSVG() still needs to be wrapped in a <svg> element, and <defs> needs to be constructed from .paths and .gradients
+// - the result of a paintSVG() still needs to be wrapped in a <svg> element, and <defs> needs to be expanded
 SamsaGlyph.prototype.paintSVG = function (paint, context) {
 	function expandAttrs (attrs) {
 		let str = "";
@@ -3989,11 +3988,12 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 		}
 
 		case PAINT_SHAPE: {
-			if (!context.paths[paint.glyphID]) {
+			// retrieve the glyph path definition if we don't already have it, and insert it into defs
+			if (!context.defs[`p${paint.glyphID}`]) {
 				const glyph = context.font.glyphs[paint.glyphID];
 				const iglyph = glyph.instantiate(context.instance);
-				const path = iglyph.svgGlyphMonochrome(0); // retrieve it if we don't already have it
-				context.paths[paint.glyphID] = `<path id="g${paint.glyphID}" d="${path}"/>`;
+				const path = iglyph.svgGlyphMonochrome(0);
+				context.defs[`p${paint.glyphID}`] = `<path id="p${paint.glyphID}" d="${path}"/>`;
 			}
 			context.lastGlyphId = paint.glyphID;
 			svg += this.paintSVG(paint.children[0], context); // there’s only one child; this should be a fill or a gradient (or maybe another PAINT_SHAPE)
@@ -4020,48 +4020,12 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 					transform += `scale(${paint.scale[0]} ${paint.scale[1]})`;
 				}
 				else if (paint.skew) {
-					transform += `skewX(${-paint.skew[0]})skewY(${-paint.skew[1]})`; // flip sign of angles
+					transform += `skewX(${-paint.skew[0]}) skewY(${-paint.skew[1]})`; // flip sign of angles
 				}
 				if (center) {
 					transform += ` translate(${-center[0]} ${-center[1]})`;
 				}
 			}
-
-			/*
-			switch (paint.format - paint.format % 2) { // 12 and 13 -> 12, 14 and 15 -> 14, etc. (variation deltas have already been added)
-
-				// these are more efficnently done by checking paint.skew etc. directly
-				// if (paint.matrix) etc.
-
-				case 12: { // PaintTransform
-					transform = `matrix(${paint.matrix.join(" ")})`;
-					break;
-				}
-				case 14: { // PaintTranslate
-					transform = `translate(${paint.translate[0]} ${paint.translate[1]})`;
-					break;
-				}
-				case 16: case 18: case 20: case 22: { // PaintScale
-					if (paint.center) transform += `translate(${-paint.center[0]} ${-paint.center[1]})`;
-					transform += `scale(${paint.scale.join(" ")})`;
-					if (paint.center) transform += `translate(${paint.center[0]} ${paint.center[1]})`;
-					break;
-				}
-				case 24: case 26: { // PaintRotate
-					if (paint.center) transform += `translate(${-paint.center[0]} ${-paint.center[1]})`;
-					transform += `rotate(${-paint.rotate})`; // flip sign of angle
-					if (paint.center) transform += `translate(${paint.center[0]} ${paint.center[1]})`;
-					break;
-				}
-				case 28: case 30: { // PaintSkew
-					if (paint.center) transform += `translate(${-paint.center[0]} ${-paint.center[1]})`;
-					transform += `skewX(${-paint.skew[0]})`; // flip sign of angle
-					transform += `skewY(${-paint.skew[1]})`; // flip sign of angle
-					if (paint.center) transform += `translate(${paint.center[0]} ${paint.center[1]})`;
-					break;
-				}
-			}
-			*/
 
 			svg = `<g transform="${transform}">`; // rewrite <g> tag
 			svg += this.paintSVG(paint.children[0], context); // there’s only one child
@@ -4070,66 +4034,80 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 
 		case PAINT_COMPOSE: {
 
-			switch (paint.format) {
-				case 2: case 3: { // PaintSolid
+			// PaintComposite
+			if (paint.format == 32) {
+
+				console.error("Attempting PaintComposite ...");
+				console.log(paint);
+
+				const m = paint.compositeMode;
+				const [modeType, mode] = PAINTCOMPOSITE_MODES[m]; // e.g. ["F", "atop"] for COMPOSITE_SRC_ATOP or ["M", "difference"] for COMPOSITE_DIFFERENCE
+				const srcDag = this.paintSVG(paint.children[0], context); // source
+				const destDag = this.paintSVG(paint.children[1], context); // destination
+
+				let svg = "";
+				let src = "src";
+				let dest = "dest";
+				if (m >= 1 && m <= 10 && (m % 2 == 0)) {
+					[src, dest] = [dest, src]; // swap src and dest for the even-numbered modes of over, in, out, atop and src and dest
+				}
+				
+				// always push the 2 shapes as defs
+				// defs.push(`<rect id="${src}" x="0" y="0" width="100" height="100" fill="#0000ff80"/>`); // src
+				// defs.push(`<rect id="${dest}" x="50" y="50" width="100" height="100" fill="#ff0000"/>`); // dest
+				
+				switch (modeType) {
+					
+					// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/feComposite
+					case "F": {
+						defs.push(`<filter id="filter-${m}">
+							<feImage href="#${dest}" x="0px" y="0px" width="300px" height="300px" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" />
+							<feComposite in="SourceGraphic" operator="${mode}" />
+							</filter>`);
+						svg += `<g>
+									<use href="#${src}" style="filter:url(#filter-${m})" />
+								</g>`;      
+						break;
+					}
+					
+					// https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
+					case "M": {
+						svg += `<g style="isolation: isolate;">
+									<use href="#src" style="mix-blend-mode: ${mode};" />
+									<use href="#dest" style="mix-blend-mode: ${mode};" />
+								</g>`;
+						break;
+					}
+					
+					// simple methods
+					case "-": {
+						if (m !== 0) svg += `<g><use href="#${src}" /></g>`; // if not COMPOSITE_CLEAR
+						break;      
+					}
+					
+				}						
+			}
+
+			else {
+
+				const paintFormatStatic = paint.format - paint.format % 2;
+
+				// simple fill
+				if (paintFormatStatic == 2) {
 					const paletteIndex = paint.paletteIndex;
 					const color = paletteIndex == 0xffff ? context.color : palette.colors[paletteIndex];
-					svg += `<use x="0" y="0" href="#g${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}" />`; // maybe update these x and y later
-					break;
+					svg += `<use href="#p${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}" />`; // maybe update these x and y later
 				}
 
-				case 32: { // PaintComposite
-
-					console.error("PaintComposite not implemented yet");
-					console.log(paint);
-
-					const src = this.paintSVG(paint.children[0], context); // source
-					const dest = this.paintSVG(paint.children[1], context); // destination
-					const feMode = FECOMPOSITE_MODES[paint.compositeMode];
-					const cssMode = CSS_MIX_BLEND_MODES[paint.compositeMode];
-
-					//const mode = FECOMPOSITE_MODES[paint.compositeMode] || CSS_MIX_BLEND_MODES[paint.compositeMode];
-					if (feMode) {
-						svg = `<g mix-blend-mode="${feMode}">`;
-						svg += src;
-						svg += dest;
-						svg += `</g>`;
-					}
-					else if (cssMode) {
-						svg = `<g style="mix-blend-mode: ${cssMode};">`;
-						svg += src;
-						svg += dest;
-						svg += `</g>`;
-					}
-					else {
-						switch (paint.compositeMode) {
-							case 0: {
-								// do nothing
-								break;
-							}
-							case 1: {
-								// paint src
-								svg += src;
-								break;
-							}
-							case 2: {
-								// paint dest
-								svg += dest;
-								break;
-							}
-						}
-					}
-					break;
-				}
-
-				default: {
-
-					// all other paint.formats are gradients, which can be handled together
-					if (!context.gradients[paint.offset]) { // if we have not already stored this paint in this glyph run
+				// gradient fill
+				else {
+					const gradientId = "g" + paint.offset;
+					// do we already have this gradient in the defs?
+					if (!context.defs[gradientId]) {
 
 						// set the initial attributes of the <linearGradient> or <radialGradient> element (we set more specific attributes later)
 						const attrs = {
-							id: "f" + paint.offset,
+							id: gradientId,
 							gradientUnits: "userSpaceOnUse",
 							spreadMethod: paint.colorLine.extend ? extendModes[paint.colorLine.extend] : undefined, // we could allow "pad" here, but instead we ignore EXTEND_PAD (0) since it is default behaviour
 						};
@@ -4141,45 +4119,45 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 							const color = colorStop.paletteIndex == 0xffff ? context.color : palette.colors[colorStop.paletteIndex];
 							stops += `<stop offset="${colorStop.stopOffset*100}%" stop-color="${font.hexColorFromU32(color)}"/>`;
 						});
-						
-						// PaintLinearGradient (4), PaintVarLinearGradient (5)
-						// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/linearGradient
-						if (paint.format < 6) {
-							[attrs.x1, attrs.y1] = paint.points[0];
-							[attrs.x2, attrs.y2] = font.linearGradientFromThreePoints(paint.points);
-							gradientElement = "linearGradient";
+
+						switch (paintFormatStatic) {
+
+							// PaintLinearGradient (4), PaintVarLinearGradient (5)
+							// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/linearGradient
+							case 4:
+								[attrs.x1, attrs.y1] = paint.points[0];
+								[attrs.x2, attrs.y2] = font.linearGradientFromThreePoints(paint.points);
+								gradientElement = "linearGradient";
+								break;
+
+							// PaintRadialGradient (6), PaintVarRadialGradient (7)
+							// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/radialGradient
+							case 6:
+								[attrs.fx, attrs.fy] = paint.points[0];
+								[attrs.cx, attrs.cy] = paint.points[1];
+								[attrs.fr, attrs.r]  = paint.radii;
+								gradientElement = "radialGradient";
+								break;
+
+							// PaintSweepGradient (8), PaintVarSweepGradient (9)
+							case 8:
+								console.error("PaintSweepGradient is not implemented yet");
+								console.log(paint);
+								// paint.center
+								// paint.startAngle
+								// paint.endAngle
+								gradientElement = "sweepGradient"; // invalid SVG, but at least will not break the output
+								break;
 						}
 
-						// PaintRadialGradient (6), PaintVarRadialGradient (7)
-						// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/radialGradient
-						else if (paint.format < 8) {
-							[attrs.fx, attrs.fy] = paint.points[0];
-							[attrs.cx, attrs.cy] = paint.points[1];
-							attrs.fr = paint.radii[0];
-							attrs.r = paint.radii[1];
-							gradientElement = "radialGradient";
-						}
-
-						// PaintSweepGradient (8), PaintVarSweepGradient (9)
-						else {
-							console.error("PaintSweepGradient is not implemented yet");
-							console.log(paint);
-							// paint.center
-							// paint.startAngle
-							// paint.endAngle
-							gradientElement = "sweepGradient"; // invalid SVG, but at least will not break the output
-						}
-
-						context.gradients[paint.offset] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;; // paint.offset is gradientId
-						svg += `<use href="#g${context.lastGlyphId}" fill="url(#f${paint.offset})" />`;
-						console.log("paint.format almost done", paint.format);
+						// add the gradient to the defs
+						context.defs[gradientId] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;
 					}
-				}
 
-				// declare which glyph outline we are using
-				// - lastGlyphId is not satisfactory, since we may have several consecutive format 10 tables defining a clip path (in practice this seems uncommon)
-				svg += `<use href="#g${context.lastGlyphId}" fill="url(#f${paint.offset})" />`;
-				break;
+					// so which glyph outline we are using?
+					// TODO: we’re using lastGlyphId for now, but it is unsatisfactory since we may have several consecutive format 10 tables defining a clip path (in practice this seems uncommon)
+					svg += `<use href="#p${context.lastGlyphId}" fill="url(#${gradientId})" />`;
+				}
 			}
 		}
 	}
@@ -4191,10 +4169,13 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 SamsaGlyph.prototype.svgGlyphCOLRv1 = function (context={}) {
 	const result = this.findCOLR(1); // might be undefined
 	if (result) {
+
 		const paintDag = this.paint(context);
+
+		console.log(paintDag);
 		if (paintDag) {
 			const svgResult = this.paintSVG(paintDag, context); // we could bring the paintSVG function inside here, but there seems little point
-			return svgResult; // this is a <g> element ready to be inserted into an <svg>, but we must also remember to add the paths and gradients from the context
+			return svgResult; // this is a <g> element ready to be inserted into an <svg>, but we must also remember to add the defs (paths and gradients) from the context
 		}
 		else {
 			return false; // we didn’t find a COLRv1 glyph
@@ -4214,6 +4195,7 @@ SamsaGlyph.prototype.svgGlyphCOLRv0 = function (context={}) { // we need to poss
 		const defaultColor = context.color === undefined ? 0x000000ff : context.color; // default color // allows 0x000000000 (a valid transparent color)
 		const palette = cpal.palettes[context.paletteId || 0];
 		let paths = "";
+		// TODO: store these paths in defs for efficient reuse
 		for (let i=0; i<numLayers; i++) {
 			buf.seek(colr.layerRecordsOffset + 4 * (firstLayerIndex + i));
 			const glyphId = buf.u16;
