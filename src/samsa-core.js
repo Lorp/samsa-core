@@ -2694,9 +2694,9 @@ class SamsaBuffer extends DataView {
 				readOperands(I16);
 				addVariations(operands);
 				let o = 0;
-				paint.scale = [ operands[o++] ]; // scaleX
+				paint.scale = [ operands[o++]/0x4000 ]; // scaleX
 				if (paint.format >= 20)
-					paint.scale.push(operands[o++]);  // scaleY
+					paint.scale.push(operands[o++]/0x4000);  // scaleY
 				if (paint.format == 18 || paint.format == 19 || paint.format == 22 || paint.format == 23)
 					paint.center = [ operands[o++], operands[o++] ]; // centerX, centerY
 				this.seek(paint.offset + nextOffset);
@@ -4017,7 +4017,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 					transform += `translate(${center[0]} ${center[1]}) `;
 				}
 				if (paint.scale) {
-					transform += `scale(${paint.scale[0]} ${paint.scale[1]})`;
+					transform += `scale(${paint.scale.join(" ")})`; // the join() handles 1 or 2 operands
 				}
 				else if (paint.skew) {
 					transform += `skewX(${-paint.skew[0]}) skewY(${-paint.skew[1]})`; // flip sign of angles
