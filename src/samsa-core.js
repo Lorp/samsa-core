@@ -482,13 +482,9 @@ const PAINT_TYPES = [
 
 const PAINT_VAR_OPERANDS = [0,0,1,1,6,6,6,6,4,4,0,0,6,6,2,2,2,2,4,4,1,1,3,3,1,1,3,3,2,2,4,4,0]; // the number of variable operands that each paint has, indexed by paint.format (prepended with a record for invalid paint.format 0) thus 33 items from 0 to 32
 
-// COLRv1 gradient extend modes
-const EXTEND_PAD = 0;
-const EXTEND_REPEAT = 1;
-const EXTEND_REFLECT = 2;
-
-// COLRv1 PaintComposite modes
-const PAINTCOMPOSITE_MODES = [
+// constants for SVG conversion of gradient extend modes and PaintComposite modes
+const SVG_GRADIENT_EXTEND_MODES = ["pad", "repeat", "reflect"];
+const SVG_PAINTCOMPOSITE_MODES = [
 	["-", "clear"], // COMPOSITE_CLEAR
 	["-", "src"], // COMPOSITE_SRC
 	["-", "dest"], // COMPOSITE_DEST
@@ -3938,7 +3934,10 @@ SamsaGlyph.prototype.paint = function (context={}) {
 		if (!context.defs) context.defs = {};
 		if (!context.font) context.font = font;
 		if (!context.rendering) context.rendering = {};
+		context.gradientTransform = "";
+		context.gradientTransformId = 0; // we add extra gradients to the defs if they are transformed
 		context.paintIds = []; // keep track of the paint IDs we’ve used (must be reset for each glyph): we 
+		context.lastGlyphId = null;
 
 		// fetch the DAG of paint tables recursively
 		buf.seek(offset);
@@ -3971,7 +3970,6 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 	}
 
 	const font = context.font;
-	const extendModes = ["pad", "repeat", "reflect"];
 	const palette = font.CPAL.palettes[context.paletteId || 0];
 	if (context.color === undefined)
 		context.color = 0x000000ff; // black
@@ -4001,33 +3999,38 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 		}
 
 		case PAINT_TRANSFORM: {
-			const center = paint.center;
+			const {scale, skew, translate, rotate, center, matrix} = paint;
 			let transform = "";
-			if (paint.translate) {
-				transform = `translate(${paint.translate[0]} ${paint.translate[1]})`;
+			if (translate) {
+				transform = `translate(${translate[0]} ${translate[1]})`;
 			}
-			else if (paint.matrix) {
-				transform = `matrix(${paint.matrix.join(" ")})`;
+			else if (matrix) {
+				transform = `matrix(${matrix.join(" ")})`;
 			}
-			else if (paint.rotate) {
-				transform += `rotate(${-paint.rotate}` + (center ? ` ${center[0]} ${center[1]}` : "") +`)`; // flip sign of angle, and use the 3-argument form if there is a center
+			else if (rotate) {
+				transform += `rotate(${-rotate}` + (center ? ` ${center[0]} ${center[1]}` : "") +`)`; // flip sign of angle, and use the 3-argument form if there is a center
 			}
 			else {
 				if (center) {
-					transform += `translate(${center[0]} ${center[1]}) `;
+					transform += `translate(${center[0]} ${center[1]})`;
 				}
-				if (paint.scale) {
-					transform += `scale(${paint.scale.join(" ")})`; // the join() handles 1 or 2 operands
+				if (scale) {
+					transform += `scale(${scale.join(" ")})`; // join() handles 1 or 2 scale operands
 				}
-				else if (paint.skew) {
-					transform += `skewX(${-paint.skew[0]}) skewY(${-paint.skew[1]})`; // flip sign of angles
+				else if (skew) {
+					transform += `skewX(${-skew[0]})skewY(${-skew[1]})`; // flip sign of angles
 				}
 				if (center) {
-					transform += ` translate(${-center[0]} ${-center[1]})`;
+					transform += `translate(${-center[0]} ${-center[1]})`;
 				}
 			}
 
-			svg = `<g transform="${transform}">`; // rewrite <g> tag
+			if (context.lastGlyphId === null) {
+				svg = `<g transform="${transform}">`; // rewrite <g> tag
+			}
+			else {
+				context.gradientTransform += transform;
+			}
 			svg += this.paintSVG(paint.children[0], context); // there’s only one child
 			break;
 		}
@@ -4041,7 +4044,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 				console.log(paint);
 
 				const m = paint.compositeMode;
-				const [modeType, mode] = PAINTCOMPOSITE_MODES[m]; // e.g. ["F", "atop"] for COMPOSITE_SRC_ATOP or ["M", "difference"] for COMPOSITE_DIFFERENCE
+				const [modeType, mode] = SVG_PAINTCOMPOSITE_MODES[m]; // e.g. ["F", "atop"] for COMPOSITE_SRC_ATOP or ["M", "difference"] for COMPOSITE_DIFFERENCE
 				const srcDag = this.paintSVG(paint.children[0], context); // source
 				const destDag = this.paintSVG(paint.children[1], context); // destination
 
@@ -4088,6 +4091,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 				}						
 			}
 
+			// simple fill and gradient fill
 			else {
 
 				const paintFormatStatic = paint.format - paint.format % 2;
@@ -4101,23 +4105,38 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 
 				// gradient fill
 				else {
-					const gradientId = "g" + paint.offset;
-					// do we already have this gradient in the defs?
-					if (!context.defs[gradientId]) {
+					let gradientId = "g" + paint.offset; // this gets modified if there is a transform
 
-						// set the initial attributes of the <linearGradient> or <radialGradient> element (we set more specific attributes later)
+					// do we already have this gradient in the defs?
+					if (!context.defs[gradientId] || context.gradientTransform) { // we try not to repeat gradients, but we always store them if there's a transform
+
+						// we must store the gradient separatelt if it has a transform
+						if (context.gradientTransform)
+							gradientId += "-" + context.gradientTransformId;
+
+						// set the initial attributes of the gradient element (we set more specific attributes later)
 						const attrs = {
 							id: gradientId,
 							gradientUnits: "userSpaceOnUse",
-							spreadMethod: paint.colorLine.extend ? extendModes[paint.colorLine.extend] : undefined, // we could allow "pad" here, but instead we ignore EXTEND_PAD (0) since it is default behaviour
+							spreadMethod: paint.colorLine.extend ? SVG_GRADIENT_EXTEND_MODES[paint.colorLine.extend] : undefined, // we could allow "pad" here, but instead we ignore EXTEND_PAD (0) since it is default behaviour
 						};
+
+						// is there a transform to use? (the shape transform should already have been cleared)
+						if (context.gradientTransform)
+							attrs.gradientTransform = context.gradientTransform;
 
 						// get the colorLine stops for all gradient types
 						let stops = "";
 						let gradientElement;
 						paint.colorLine.colorStops.forEach(colorStop => {
 							const color = colorStop.paletteIndex == 0xffff ? context.color : palette.colors[colorStop.paletteIndex];
-							stops += `<stop offset="${colorStop.stopOffset*100}%" stop-color="${font.hexColorFromU32(color)}"/>`;
+							const attrs = {
+								offset: `${colorStop.stopOffset*100}%`,
+								"stop-color": font.hexColorFromU32(color),
+							}
+							if (colorStop.alpha != 1)
+								attrs["stop-opacity"] = colorStop.alpha;
+							stops += `<stop${expandAttrs(attrs)}/>`;
 						});
 
 						switch (paintFormatStatic) {
@@ -4152,14 +4171,27 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 
 						// add the gradient to the defs
 						context.defs[gradientId] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;
+
+						// gradientTransform housekeeping
+						context.gradientTransformId++;
+						context.gradientTransform = "";
 					}
 
 					// so which glyph outline we are using?
 					// TODO: we’re using lastGlyphId for now, but it is unsatisfactory since we may have several consecutive format 10 tables defining a clip path (in practice this seems uncommon)
 					svg += `<use href="#p${context.lastGlyphId}" fill="url(#${gradientId})" />`;
 				}
+
 			}
+			context.lastGlyphId = null;
+			break;
 		}
+
+		default: {
+			console.error("Should not get here", paint);
+			break;
+		}
+
 	}
 	
 	svg += "</g>";
