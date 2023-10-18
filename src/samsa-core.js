@@ -425,6 +425,37 @@ const FORMATS = {
 		regionIndexCount: U16,
 		regionIndexes: [U16, "regionIndexCount"],
 	},
+
+	WOFF2_header: {
+		signature: TAG,
+		flavor: U32,
+		length: U32,
+		numTables: U16,
+		reserved: U16,
+		totalSfntSize: U32,
+		totalCompressedSize: U32,
+		majorVersion: U16,
+		minorVersion: U16,
+		metaOffset: U32,
+		metaLength: U32,
+		metaOrigLength: U32,
+		privOffset: U32,
+		privLength: U32,
+	},
+
+	WOFF2_Transformed_glyf: {
+		reserved: U16,
+		optionFlags: U16,
+		numGlyphs: U16,
+		indexFormat: U16,
+		nContourStreamSize: U32,
+		nPointsStreamSize: U32,
+		flagStreamSize: U32,
+		glyphStreamSize: U32,
+		compositeStreamSize: U32,
+		bboxStreamSize: U32,
+		instructionStreamSize: U32,
+	},
 };
 
 // gvar
@@ -1178,9 +1209,10 @@ Object.keys(PAINT_HANDLERS).forEach(key => {
 
 
 // SamsaBuffer is a DataView subclass, constructed from an ArrayBuffer in exactly the same way as DataView
-// - the main difference is that it keeps track of a memory pointer, which is incremented on read/write
-// - we also keep track of a phase, which is used for nibble reads/writes
-// - there are numerous decode/encode methods for converting complex data structures to and from binary
+// - the extensions are:
+//   * it keeps track of a memory pointer, which is incremented on read/write
+//   * it keeps track of a phase, used for nibble reads/writes
+//   * it has numerous decode/encode methods for converting complex data structures to and from binary
 class SamsaBuffer extends DataView {
 	
 	constructor(buffer, byteOffset, byteLength) {
@@ -1245,6 +1277,12 @@ class SamsaBuffer extends DataView {
 		return p >= 0 && p < this.byteLength;
 	}
 
+	padToModulo(n) {
+		while (this.p % n) {
+			this.u8 = 0;
+		}
+	}
+
 	// uint64, int64
 	set u64(num) {
 		this.setUint32(this.p, num >> 32);
@@ -1304,6 +1342,22 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
+	// u32 for WOFF2: https://www.w3.org/TR/WOFF2/#UIntBase128
+	get u32_128() {
+		let accum = 0;
+		for (let i = 0; i < 5; i++) {
+			let data_byte = this.getUint8(this.p++);
+			if (i == 0 && data_byte == 0x80) return false; // No leading 0's
+			if (accum & 0xfe000000) return false; // If any of top 7 bits are set then << 7 would overflow
+			accum = (accum << 7) | (data_byte & 0x7f);
+
+			// Spin until most significant bit of data byte is false
+			if ((data_byte & 0x80) == 0) {
+				return accum;
+			}
+		}
+	}
+
 	// uint24, int24
 	set u24(num) {
 		this.setUint16(this.p, num >> 8);
@@ -1341,6 +1395,7 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
+	// u16 for WOFF2: https://www.w3.org/TR/WOFF2/#255UInt16
 	set u16_255(num) {
 		const oneMoreByteCode1    = 255;
 		const oneMoreByteCode2    = 254;
@@ -1364,12 +1419,11 @@ class SamsaBuffer extends DataView {
 	}
 
 	get u16_255() {
-		// https://www.w3.org/TR/WOFF2/#glyf_table_format
 		const oneMoreByteCode1    = 255;
 		const oneMoreByteCode2    = 254;
 		const wordCode            = 253;
 		const lowestUCode         = 253;
-		let value, value2;
+		let value;
 
 		const code = this.u8;
 		if (code == wordCode) {
@@ -1696,7 +1750,7 @@ class SamsaBuffer extends DataView {
 			}
 
 			// points
-			console.assert(flags.length === glyph.numPoints, "Error in glyph decoding: flags.length (%i) != glyph.numPoints (%i)", flags.length, glyph.numPoints);
+			console.assert(flags.length === glyph.numPoints, "Error in glyph decoding: flags.length (%i) != glyph.numPoints (%i) for glyph #%i", flags.length, glyph.numPoints, glyph.id);
 			let x_=0, y_=0, x, y;
 			flags.forEach((flag,f) => {
 				// const mask = flag & 0x12;
@@ -2746,7 +2800,519 @@ class SamsaBuffer extends DataView {
 		context.paintIds.pop(); // we pop the paintId we pushed at the beginning of this decodePaint(), but might reuse the same paintId in later paints in the same glyph
 		return paint; // having recursed the whole paint tree, this is now a DAG
 	}
+
+	// decode WOFF2
+	// we’ll move this function to samsa-core.js
+	// - given WOFF2 data, return a SamsaBuffer (a subclass of DataView) that contains an OFF font
+	// Options:
+	// - ignoreChecksums: boolean, default false
+	// - ignoreInstructions: boolean, default false
+	// - packPoints: boolean, default true (false means larger files but faster OFF creation)
+	// - Uint8Array: boolean, default false (true means return a Uint8Array instead of a SamsaBuffer)
+	decodeWOFF2(brotli, options = {}) {
+
+		// normalize options
+		if (options.ignoreChecksums === undefined)
+			options.ignoreChecksums = false;
+		if (options.ignoreInstructions === undefined)
+			options.ignoreInstructions = false;
+		if (options.packPoints === undefined)
+			options.packPoints = true;
+
+		// read WOFF2 header
+		const WOFF2_TABLE_TAGS = ["cmap","head","hhea","hmtx","maxp","name","OS/2","post","cvt ","fpgm","glyf","loca","prep","CFF ","VORG","EBDT","EBLC","gasp","hdmx","kern","LTSH","PCLT","VDMX","vhea","vmtx","BASE","GDEF","GPOS","GSUB","EBSC","JSTF","MATH","CBDT","CBLC","COLR","CPAL","SVG ","sbix","acnt","avar","bdat","bloc","bsln","cvar","fdsc","feat","fmtx","fvar","gvar","hsty","just","lcar","mort","morx","opbd","prop","trak","Zapf","Silf","Glat","Gloc","Feat","Sill"];
+		const signature = this.tag;
+
+		// check signature
+		if (signature !== "wOF2") {
+			console.error("!!!!!!!!!! !!!!!!!!!! Not a WOFF2 file !!!!!!!!!! !!!!!!!!!!");
+			return -1;
+		}
+
+		// read header (48 bytes)
+		this.seekr(-4);
+		const header = this.decode(FORMATS.WOFF2_header);
+
+		// read table directory
+		const tables = [];
+		const tableDirectory = {};
+		for (let t=0; t<header.numTables; t++) {
+			const table = {};
+			let nullTransform = false;
+			let flags = this.u8;
+			const transformationVersion = (flags & 0xc0) >> 6; // 0..3
+			table.tag = (flags & 0x3f) == 0x3f ? this.tag : WOFF2_TABLE_TAGS[flags & 0x3f];
+			table.origLength = this.u32_128;
+			if (["glyf","loca"].includes(table.tag)) {
+				if (transformationVersion == 3)
+					nullTransform = true;
+			}
+			else if (transformationVersion == 0)
+				nullTransform = true;
+		
+			table.transformLength = nullTransform ? 0 : this.u32_128;
+		
+			// store table in tables array and in tableDirectory object, so we can access by index or by tag
+			tables.push(table);
+			tableDirectory[table.tag] = table;
+		}
+
+		// decompress all the brotli data in compressedBuffer into a single decompressedBuffer
+		const compressedBufferStart = this.tell();
+		const compressedBuffer = Buffer.from(this.buffer, compressedBufferStart, header.totalCompressedSize); // Buffer, not SamsaBuffer
+		const decompressedBuffer = brotli.decompress(compressedBuffer); // Buffer, not SamsaBuffer
+		
+		let locaBuffer;
+		let indexToLocFormat = 0; // this, after possibly being set to 1, will be written to head.indexToLocFormat (0=16-bit, 1=32-bit)
+
+		// slice the decompressedBuffer into a SamsaBuffer for each table
+		let offset = 0;
+		tables.forEach(table => {
+			if (table.tag !== "loca") { // loca never has data
+				let lengthToUse = table.transformLength ? table.transformLength : table.origLength;
+				table.buffer = new SamsaBuffer(decompressedBuffer.buffer, offset, lengthToUse);
+				offset += lengthToUse;
+			}
+		});
+
+		// create SamsaBuffer for output font and a Uint8Array view on it
+		const outputBuf = new SamsaBuffer(new ArrayBuffer(25000000)); // hmm, we should allocate more intelligently
+		const outputBufU8 = new Uint8Array(outputBuf.buffer); // we can use outputBufU8[outputBuf.p] to write bytes to the current buffer position
+		
+		// skip header for now, we’ll write it later
+		outputBuf.seek(12 + tables.length * 16);
+		
+		// write each table to outputBuf
+		tables.forEach(table => {
+			
+			table.offset = outputBuf.tell();
+			table.checkSum = 0;
+			
+			switch (table.tag) {
+		
+				case "glyf": {
+					const glyfHeader = table.buffer.decode(FORMATS.WOFF2_Transformed_glyf);
+		
+					// set up loca buffer: initially we populate as u16, only switching to u32 if we overflow
+					tableDirectory.loca.length = (glyfHeader.numGlyphs+1) * 2; // sic 2
+					locaBuffer = new SamsaBuffer(new ArrayBuffer(4 * (glyfHeader.numGlyphs+1))); // sic 4
+					locaBuffer.u16 = 0;
+					
+					// set up the parallel streams
+					const bufs = {};
+					const bufTypes = ["nContour","nPoints","flag","glyph","composite","bbox","instruction"];
+					let bufOffset = table.buffer.byteOffset + 36;
+					bufTypes.forEach((bufType, b) => {
+						const streamSize = glyfHeader[bufType + "StreamSize"]; // WARNING: constructs object property names
+						if (streamSize > 0) {
+							bufs[bufType] = new SamsaBuffer(table.buffer.buffer, bufOffset, streamSize);
+							bufOffset += streamSize;
+						}
+					});
+
+					// short variable names for common bufs
+					const gBuf = bufs.glyph;
+			
+					const bboxBitmapSize = 4 * Math.ceil(glyfHeader.numGlyphs / 32); // WOFF2 spec: "The total number of bytes in bboxBitmap is equal to 4 * floor((numGlyphs + 31) / 32)"
+					bufs.bboxValues = new SamsaBuffer(bufs.bbox.buffer, bufs.bbox.byteOffset + bboxBitmapSize);
+					
+					const maxNumPoints = 100;
+					const unpackedMax = new DataView(new ArrayBuffer(5 * maxNumPoints)); // allocating here means we don’t need to allocate for each glyph
+		
+					const GstartTime = performance.now();
+		
+					// loop through all glyphs
+					let bboxByte;
+					for (	let g=0,
+							bit=0x80;
+				
+							g<glyfHeader.numGlyphs;
+		
+							g++,
+							bit = bit == 0x01 ? 0x80 : bit >> 1) { // advance the bit index mask (0x80->0x40->0x20->0x10->0x08->0x04->0x02->0x01->0x80...)
+			
+						// numberOfContours
+						const numberOfContours = bufs.nContour.i16;
+						let instructionLength = 0;
+						let xMin, yMin, xMax, yMax;
+		
+						// start writing the glyf data
+						const glyphStart = outputBuf.tell();
+			
+						// is the bbox embedded?
+						// - if so, get it now
+						// - if not, calculate it after decoding all the points of a simple glyph
+						// - it’s an error to have this bit set for empty or composite glyphs
+						if (bit == 0x80)
+							bboxByte = bufs.bbox.u8; // only read a byte full of bits if we are at the start of that byte
+						const bboxIsEmbedded = bboxByte & bit;
+						if (bboxIsEmbedded) {
+							xMin = bufs.bboxValues.i16;
+							yMin = bufs.bboxValues.i16;
+							xMax = bufs.bboxValues.i16;
+							yMax = bufs.bboxValues.i16;
+						}
+		
+						// skip empty glyphs
+						// console.assert(!(numberOfContours < 0 && glyfHeader.compositeStreamSize == 0), "We have a composite glyph but the composite stream is empty.");
+						if (numberOfContours !== 0) {
+			
+							// write numberOfContours and leave space for bbox
+							outputBuf.i16 = numberOfContours;
+							outputBuf.seekr(8); // skip over the bbox, we write it later
+				
+							// SIMPLE GLYPH
+							if (numberOfContours > 0) {
+		
+								// transform the nPoints data into an endPts array
+								let numPoints = 0;
+								for (let c=0; c<numberOfContours; c++) {
+									numPoints += bufs.nPoints.u16_255;
+									outputBuf.u16 = numPoints - 1; // endPts entry
+								}
+			
+								// create the arrays that we’ll complete
+								const glyfFlags = [];
+								const dxArray = [];
+								const dyArray = [];
+		
+								// usually we can use the previously allocated unpackedMax, but if the number of points is greater than maxNumPoints, we allocate a new buffer
+								const unpacked = numPoints <= maxNumPoints ? unpackedMax : new DataView(new ArrayBuffer(5 * numPoints));
+								const unpackedU8 = new Uint8Array(unpacked.buffer, 0, 5 * numPoints); // this is trimmed to exact length so that we can use it with .set() later; note that 5 = 1+2+2 (flag + dx + dy)
+		
+								// decode the mtx-transformed glyf data into regular glyf data
+								// - it would likely be quicker to have all 128 possibilities as individual functions?
+								let cx = 0, cy = 0;
+								for (let pt=0; pt<numPoints; pt++) {
+		
+									let flag = bufs.flag.u8;
+									let f = 1 - (flag >> 7); // f is the flags byte we build for glyf (on-curve polarity is inverse between glyf and mtx)
+									flag = flag & 0x7f; // clear the curve flag
+
+									// this decision tree is faster than the lookup array of 128 functions
+									let dx = 0, dy = 0;
+									let xSign = 0, ySign = 0;
+									let xDelta = 0, yDelta = 0;
+									let base, xy;
+			
+									if (flag < 10) {
+										// x = 0, y is 8-bit
+										ySign = (flag & 0x01) ? 1 : -1;
+										yDelta = (flag >> 1) * 256;
+										dy = ySign * (yDelta + gBuf.u8);
+									}
+									else if (flag < 20) {
+										// x is 8-bit, y = 0
+										xSign = (flag & 0x01) ? 1 : -1;
+										xDelta = ((flag - 10) >> 1) * 256;
+										dx = xSign * (xDelta + gBuf.u8);
+									}
+									else {
+										xSign = (flag & 0x01) ? 1 : -1;
+										ySign = (flag & 0x02) ? 1 : -1;
+										let x, y;
+			
+										if (flag < 84) {
+											// x and y are 4-bit
+											base = flag - 20;
+											xDelta = ((base >> 4)) * 16 + 1;
+											yDelta = ((base % 16) >> 2) * 16 + 1;
+											xy = gBuf.u8;
+											x = xy >> 4;
+											y = xy & 0x0f;
+										}
+										else if (flag < 120) {
+											// x and y are 8-bit
+											base = flag - 84;
+											xDelta = Math.floor(base / 12) * 256 + 1;
+											yDelta = ((base % 12) >> 2) * 256 + 1;
+											x = gBuf.u8;
+											y = gBuf.u8;
+										}
+										else if (flag < 124) {
+											// x and y are 12-bit
+											x = gBuf.u8 << 4;
+											xy = gBuf.u8;
+											x += xy >> 4;
+											y = gBuf.u8 + ((xy & 0x0f) << 8);
+										}
+										else {
+											// x and y are 16-bit
+											x = gBuf.u16;
+											y = gBuf.u16;
+										}
+										dx = xSign * (xDelta + x);
+										dy = ySign * (yDelta + y);
+									}
+			
+									// update the absolute point values
+									cx += dx;
+									cy += dy;
+			
+									// update bbox
+									if (!bboxIsEmbedded) {
+										if (pt == 0) {
+											xMin = xMax = cx;
+											yMin = yMax = cy;
+										}
+										else {
+											if (cx < xMin) xMin = cx; // this is much faster than Math.min()
+											if (cy < yMin) yMin = cy;
+											if (cx > xMax) xMax = cx;
+											if (cy > yMax) yMax = cy;
+										}
+									}
+			
+									// prepare dxArray and dyArray for decompressed buffer: note that we do not push 0 values!
+									if (options.packPoints) {
+										if (dx==0)
+											f |= 0x10;
+										else {
+											if (dx >= -255 && dx <= 255)
+												f |= (dx > 0 ? 0x12 : 0x02);
+											dxArray.push(dx);
+										}
+		
+										if (dy==0)
+											f |= 0x20;
+										else {
+											if (dy >= -255 && dy <= 255)
+												f |= (dy > 0 ? 0x24 : 0x04);
+											dyArray.push(dy);
+										}
+		
+										glyfFlags[pt] = f; // the curve bit is already set
+									}
+									else {
+										// write to a buffer here, copy it to outputBuf later
+										// - we already know the relative positions of f, dx and dy so we can write them all now without intermediate storage
+										unpackedU8[pt] = f;
+										unpacked.setInt16(pt * 2 + numPoints,     dx);
+										unpacked.setInt16(pt * 2 + numPoints * 3, dy);
+									}
+								}
+		
+								// handle instructions
+								instructionLength = gBuf.u16_255; // always read instructionLength from the glyph stream
+								if (instructionLength == 0 || options.ignoreInstructions) {
+									// no instructions
+									outputBuf.u16 = 0;
+								}
+								else {
+									// yes instructions
+									outputBuf.u16 = instructionLength;
+									const instrBuf = new Uint8Array(bufs.instruction.buffer, bufs.instruction.byteOffset + bufs.instruction.tell(), instructionLength);
+									outputBufU8.set(instrBuf, outputBuf.tell()); // copy instrBuf to the output stream at location outputBuf.tell()
+									bufs.instruction.seekr(instructionLength); // update source pointer
+									outputBuf.seekr(instructionLength); // update target pointer
+								}
+		
+								// we have all the flags and all the dx and dy values
+								if (options.packPoints) {
+
+									// 1. write flags with RLE
+									let rpt = 0;
+									outputBuf.u8 = glyfFlags[0]; // means we don’t check pt>0 in the loop
+									for (let pt=1; pt<numPoints; pt++) {
+										if (glyfFlags[pt] == glyfFlags[pt-1] && rpt < 255) {
+											rpt++;
+										}
+										else {
+											rpt = 0;
+										}
+						
+										if (rpt<2) {
+											outputBuf.u8 = glyfFlags[pt]; // write without compression (don’t compress 2 consecutive identical bytes)
+										}
+										else {
+											const currentPos = outputBuf.tell();
+											if (rpt==2) {
+												outputBuf.seek(currentPos-2);
+												outputBuf.u8 = glyfFlags[pt] | 0x08; // set repeat bit on the pre-previous flag byte
+											}
+											outputBuf.seek(currentPos-1);
+											outputBuf.u8 = rpt; // write the number of repeats
+										}
+									}
+		
+									// 2. write x or y coordinates (dxArray and dyArray only contain non-zero values, so we avoid a check here!)
+									const writePoints = v => {
+										const va = Math.abs(v);
+										if (va < 256)
+											outputBuf.u8 = va;
+										else
+											outputBuf.i16 = v;
+									};
+									dxArray.forEach(writePoints);
+									dyArray.forEach(writePoints);
+								}
+								else {
+									outputBufU8.set(unpackedU8, outputBuf.tell());
+									outputBuf.seekr(unpackedU8.length);
+								}
+							}
+						
+							// COMPOSITE GLYPH
+							else if (numberOfContours == -1) {
+								// composite is a simple copy operation, but we need to find out how many bytes to copy
+								// - format here is identical to regular glyf format, so there is no decoding (except for instructionLength format and location of instructions)
+								const compGlyphStart = bufs.composite.tell();
+								let compGlyphSize = 0;
+								let flags;
+								let weHaveInstructions = false;
+								do {
+									flags = bufs.composite.u16;
+									let compSize = 6; // the minimum size of a component: flags (2 bytes), glyphId (2 bytes), arg0 (1 byte), arg1 (1 byte)
+									if (flags & 0x0001) // ARG_1_AND_2_ARE_WORDS
+										compSize += 2;
+									if (flags & 0x0008) // WE_HAVE_A_SCALE
+										compSize += 2;
+									else if (flags & 0x0040) // WE_HAVE_AN_X_AND_Y_SCALE
+										compSize += 4;
+									else if (flags & 0x0080) // WE_HAVE_A_TWO_BY_TWO
+										compSize += 8;	
+									if (flags & 0x0100) { // WE_HAVE_INSTRUCTIONS
+										weHaveInstructions = true;
+										if (options.ignoreInstructions) {
+											bufs.composite.seekr(-2);
+											bufs.composite.u16 = flags & ~0x0100; // clear the WE_HAVE_INSTRUCTIONS bit
+										}
+									}
+			
+									bufs.composite.seekr(compSize-2); // get to the start of the next component
+									compGlyphSize += compSize;
+								} while (flags & 0x0020); // MORE_COMPONENTS
+								// now the pointer is at compGlyphStart + compGlyphSize
+		
+								// composite: copy glyph
+								const compBuf = new Uint8Array(bufs.composite.buffer, bufs.composite.byteOffset + compGlyphStart, compGlyphSize); // set up compBuf ready for copying to the output stream
+								outputBufU8.set(compBuf, outputBuf.tell()); // copy compBuf to the output stream at location outputBuf.tell()
+								outputBuf.seekr(compGlyphSize); // fix the pointer after copying
+			
+								// composite: copy instructions
+								if (weHaveInstructions) {
+									instructionLength = bufs.glyph.u16_255; // "Read one 255UInt16 value from the glyph stream" (N.B. glyph stream not composite stream!)
+									if (!options.ignoreInstructions) {
+										outputBuf.u16 = instructionLength;
+										if (instructionLength > 0) {
+											const instrBuf = new Uint8Array(bufs.instruction.buffer, bufs.instruction.byteOffset + bufs.instruction.tell(), instructionLength);
+											outputBufU8.set(instrBuf, outputBuf.tell()); // copy compBuf to the output stream at location outputBuf.tell()
+											outputBuf.seekr(instructionLength);
+											bufs.instruction.seekr(instructionLength);
+										}
+									}
+								}
+							}
+			
+							// write bbox for simple and composite glyphs (works for embedded or calculated bbox)
+							const glyphEnd = outputBuf.tell();
+							outputBuf.seek(glyphStart+2);
+							outputBuf.i16 = xMin;
+							outputBuf.i16 = yMin;
+							outputBuf.i16 = xMax;
+							outputBuf.i16 = yMax;
+							outputBuf.seek(glyphEnd);
+			
+							// pad glyph to 2 bytes (all glyphs need this)
+							outputBuf.padToModulo(2);
+			
+						} // end of non-empty glyph branch
+			
+						// write loca in either 16-bit or 32-bit format
+						// - hmm, an algo that just stores loca in an array, then writes afterwards is probabaly just as quick for 16 bit, faster for 32 bit loca, much easier to read...
+						const glyphLoca = outputBuf.tell() - table.offset;
+						if (glyphLoca / 2 < 0x10000) {
+							locaBuffer.u16 = glyphLoca / 2; // write 16-bit loca
+						}
+						else {
+							// write 32-bit loca
+							if (indexToLocFormat==0) {
+								// transform the existing 16-bit locas into 32-bit locas: we rewrite g values, then write the (g+1)th value
+								indexToLocFormat = 1;
+								for (let g_ = g; g_ >= 0; g_--) { // copy IN REVERSE so we don’t overwrite
+									locaBuffer.seek(2*g_);
+									const longPos = locaBuffer.u16 * 2;
+									locaBuffer.seek(4*g_);
+									locaBuffer.u32 = longPos;
+								}
+								locaBuffer.seek(4*(g+1)); // now it’s in the right position for subsequent writes
+							}
+							locaBuffer.u32 = glyphLoca; // write 32-bit loca
+						}
+			
+			
+					} // end of glyph loop
+			
+					const GendTime = performance.now();
+					console.log(`Elapsed time of glyph loop = ${GendTime - GstartTime}ms`);
+					
+					table.length = outputBuf.tell() - table.offset; // determine glyf table length (it’s the current position of outputBuf minus the offset of this table)
+					tableDirectory.loca.length = locaBuffer.tell(); // determine loca table length (it’s the current position of locaBuffer)
+					tableDirectory.loca.buffer = locaBuffer; // assign locaBuffer to loca table buffer so it works when being written to outputBuf in the "default" case below
+			
+					break;
+				}
+		
+				// write any table (apart from glyf)
+				// - loca is also cool here, since we’ve set up tableDirectory.loca.length and tableDirectory.loca.buffer in the "glyf" case above (and loca always succeeds glyf)
+				default: {
+		
+					if (!table.length)
+						table.length = table.origLength;
+					table.offset = outputBuf.tell();
+					table.checkSum = 0;
+		
+					// copy the table buffer to outputBuf
+					const tableBufferU8 = new Uint8Array(table.buffer.buffer, table.buffer.byteOffset, table.length);
+					outputBufU8.set(tableBufferU8, outputBuf.tell());
+					outputBuf.seekr(table.length);
+					break;
+				}
+			}
+		
+			// add padding
+			outputBuf.padToModulo(4);
+		});
+
+		// store the length... we’re next going to fix the beginning
+		const finalLength = outputBuf.tell();
+
+		// FIXUPS
+
+		// fix head.indexToLocFormat to the value actually used, rather the one read from the input
+		outputBuf.seek(tableDirectory.head.offset + 50);
+		outputBuf.u16 = indexToLocFormat; // either 0 or 1
+
+		// write final header and table directory
+		outputBuf.seek(0);
+		outputBuf.u32 = header.flavor;
+		outputBuf.u16 = tables.length;
+		outputBuf.seek(12);
+		tables
+			.sort((a,b) => { if (a.tag < b.tag) return -1; if (a.tag > b.tag) return 1; return 0; }) // sort by tag
+			.forEach(table => {
+				outputBuf.tag = table.tag;
+				outputBuf.u32 = table.checkSum; // not yet calculating checksum
+				outputBuf.u32 = table.offset;
+				outputBuf.u32 = table.length;
+			});
+
+		// write final file
+		const finalBufferU8 = new Uint8Array(outputBufU8.buffer, 0, finalLength);
+		const finalBuffer = new SamsaBuffer(outputBufU8.buffer, 0, finalLength);
+
+		// return the tables, if requested
+		if (options.tables !== undefined)
+			options.tables = tables;
+		if (options.tableDirectory !== undefined)
+			options.tableDirectory = tableDirectory;
+
+		// return the SamsaBuffer as either a Uint8Array or a SamsaBuffer, depending on options
+		return options.Uint8Array ? finalBufferU8 : finalBuffer;
+	}
+
 }
+
 
 //-------------------------------------------------------------------------------
 // SamsaFont
@@ -4100,7 +4666,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 				if (paintFormatStatic == 2) {
 					const paletteIndex = paint.paletteIndex;
 					const color = paletteIndex == 0xffff ? context.color : palette.colors[paletteIndex];
-					svg += `<use href="#p${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}" />`; // maybe update these x and y later
+					svg += `<use href="#p${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}"${paint.alpha !== 1 ? `fill-opacity="${paint.alpha}"` : ""}/>`; // maybe update these x and y later
 				}
 
 				// gradient fill
