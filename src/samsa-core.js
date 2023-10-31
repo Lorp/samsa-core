@@ -2802,13 +2802,15 @@ class SamsaBuffer extends DataView {
 	}
 
 	// decode WOFF2
-	// we’ll move this function to samsa-core.js
 	// - given WOFF2 data, return a SamsaBuffer (a subclass of DataView) that contains an OFF font
+	// - requires a brotli argument, an object with a decompress() method that turns a compressed Buffer into a decompressed Buffer
 	// Options:
 	// - ignoreChecksums: boolean, default false
 	// - ignoreInstructions: boolean, default false
 	// - packPoints: boolean, default true (false means larger files but faster OFF creation)
 	// - Uint8Array: boolean, default false (true means return a Uint8Array instead of a SamsaBuffer)
+	// - tables: if not undefined, it must be an empty array that will receive the table array created in the method
+	// - tableDirectory: if not undefined, it must be an empty object that will receive the tableDiretory object created in the method
 	decodeWOFF2(brotli, options = {}) {
 
 		// normalize options
@@ -2916,10 +2918,8 @@ class SamsaBuffer extends DataView {
 					const bboxBitmapSize = 4 * Math.ceil(glyfHeader.numGlyphs / 32); // WOFF2 spec: "The total number of bytes in bboxBitmap is equal to 4 * floor((numGlyphs + 31) / 32)"
 					bufs.bboxValues = new SamsaBuffer(bufs.bbox.buffer, bufs.bbox.byteOffset + bboxBitmapSize);
 					
-					const maxNumPoints = 100;
+					const maxNumPoints = 100; // we allow this to grow in those rare occasions
 					const unpackedMax = new DataView(new ArrayBuffer(5 * maxNumPoints)); // allocating here means we don’t need to allocate for each glyph
-		
-					const GstartTime = performance.now();
 		
 					// loop through all glyphs
 					let bboxByte;
@@ -3243,13 +3243,9 @@ class SamsaBuffer extends DataView {
 			
 					} // end of glyph loop
 			
-					const GendTime = performance.now();
-					console.log(`Elapsed time of glyph loop = ${GendTime - GstartTime}ms`);
-					
 					table.length = outputBuf.tell() - table.offset; // determine glyf table length (it’s the current position of outputBuf minus the offset of this table)
 					tableDirectory.loca.length = locaBuffer.tell(); // determine loca table length (it’s the current position of locaBuffer)
 					tableDirectory.loca.buffer = locaBuffer; // assign locaBuffer to loca table buffer so it works when being written to outputBuf in the "default" case below
-			
 					break;
 				}
 		
