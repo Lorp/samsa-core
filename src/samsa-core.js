@@ -608,7 +608,7 @@ const TABLE_DECODERS = {
 			// These formats are decoded ready for quick lookup in SamsaFont.glyphIdFromUnicode()
 			switch (characterMap.format) {
 
-				case 0: {
+				case 0: { // "Byte encoding table"
 					characterMap.mapping = [];
 					for (let c=0; c<256; c++) {
 						characterMap.mapping[c] = buf.u8;
@@ -616,7 +616,7 @@ const TABLE_DECODERS = {
 					break;
 				}
 
-				case 4: {
+				case 4: { // "Segment mapping to delta values"
 					const segCount = buf.u16 / 2;
 					buf.seekr(6); // skip binary search params
 					characterMap.segments = [];
@@ -633,7 +633,7 @@ const TABLE_DECODERS = {
 					break;
 				}
 
-				case 12: {
+				case 12: { // "Segmented coverage"
 					const numGroups = buf.u32;
 					characterMap.groups = [];
 					for (let grp=0; grp<numGroups; grp++) {
@@ -3491,13 +3491,13 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 
 	switch (characterMap.format) {
 
-		case 1: {
-			//g = characterMap.mapping(uni) ?? 0;
-			g = characterMap.mapping(uni) ? characterMap.mapping(uni) : 0;
+		case 1: { // "Byte encoding table"
+			//g = characterMap.mapping[uni] ?? 0;
+			g = characterMap.mapping[uni] ? characterMap.mapping[uni] : 0;
 			break;
 		}
 
-		case 4: {
+		case 4: { // "Segment mapping to delta values"
 			// algo: https://learn.microsoft.com/en-us/typography/opentype/spec/cmap#format-4-segment-mapping-to-delta-values
 			let s, segment;
 			for (s=0; s<characterMap.segments.length; s++) { // this could be a binary search
@@ -3522,7 +3522,7 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 			break;
 		}
 
-		case 12: {
+		case 12: { // "Segmented coverage"
 			for (let grp=0; grp<characterMap.groups.length; grp++) {
 				const group = characterMap.groups[grp];
 				if (uni >= group.start && uni <= group.end) {
