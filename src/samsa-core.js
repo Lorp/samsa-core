@@ -623,7 +623,7 @@ const TABLE_DECODERS = {
 							encoding.segments[s].start = bufE.u16;
 						for (let s=0; s<segCount; s++)
 							encoding.segments[s].idDelta = bufE.u16;
-						encoding.idRangeOffsetOffset = bufE.tell();
+						encoding.idRangeOffsetOffset = bufE.tell() + encodingRecord.subtableOffset; // recording this absolutely makes things easier later
 						for (let s=0; s<segCount; s++)
 							encoding.segments[s].idRangeOffset = bufE.u16;
 						break;
