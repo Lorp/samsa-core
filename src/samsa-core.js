@@ -330,7 +330,7 @@ const FORMATS = {
 		subtableOffset: U32,
 	},
 
-	CharacterMap: {
+	CharacterEncoding: {
 		format: U16,
 		_IF_: [["format", "<=", 6], {
 			length: U16,
@@ -584,69 +584,105 @@ const TABLE_DECODERS = {
 		// - this function works in step with SamsaFont.prototype.glyphIdFromUnicode()
 		const cmap = font.cmap;
 		cmap.lookup = []; // the main cmap lookup table
-		cmap.encodingRecords = [];
+		cmap.encodings = {};
+
+		
+		buf.seek(4);
 
 		// step thru the encodingRecords
-		const validEncodings = [ 0 * 0x10000 + 3, 3 * 0x10000 + 1, 3 * 0x10000 + 10 ]; // we encode [0,3], [3,1] and [3,10] like this for easy searching
-		buf.seek(4);
+		// - we only process the encodings we care about
+		const uniqueEncodings = {}; // makes sure we don’t parse the same encoding twice, in case it is referred to twice
 		for (let t=0; t < cmap.numTables; t++) {
 			const encodingRecord = buf.decode(FORMATS.EncodingRecord);
-			if (validEncodings.includes(encodingRecord.platformID * 0x10000 + encodingRecord.encodingID)) {
-				cmap.encodingRecord = encodingRecord; // this will prefer the later ones, so [3,10] better than [3,1]
-			}
-			cmap.encodingRecords.push(encodingRecord);
-		}
-		
-		// select the last encodingRecord we found that was valid for us [3,10] is better than [3,1] and [0,3]
-		if (cmap.encodingRecord) {
+			const platEnc = (encodingRecord.platformID << 16) + encodingRecord.encodingID; // store each platform/encoding pairs as one uint32 so we can easily match them
+			cmap.encodings[platEnc] = encodingRecord; // object with "uint32" keys (the key being a platform/encoding pair)
+			const bufE = new SamsaBuffer(buf.buffer, buf.byteOffset + encodingRecord.subtableOffset);
+			const encoding = bufE.decode(FORMATS.CharacterEncoding);
+			if (uniqueEncodings[encodingRecord.subtableOffset] === undefined) {
+				// uncached
+				console.log("uncached", platEnc.toString(16).padStart(8, "0"), encodingRecord.subtableOffset);
 
-			buf.seek(cmap.encodingRecord.subtableOffset);
-			const characterMap = buf.decode(FORMATS.CharacterMap);
+				switch (encoding.format) {
 
-			// parse the format, then switch to format-specific parser
-			// TODO: we’d save memory by zipping through the binary live...
-			// These formats are decoded ready for quick lookup in SamsaFont.glyphIdFromUnicode()
-			switch (characterMap.format) {
-
-				case 0: { // "Byte encoding table"
-					characterMap.mapping = [];
-					for (let c=0; c<256; c++) {
-						characterMap.mapping[c] = buf.u8;
+					case 0: { // "Byte encoding table"
+						encoding.mapping = [];
+						for (let c=0; c<256; c++) {
+							encoding.mapping[c] = bufE.u8;
+						}
+						break;
 					}
-					break;
-				}
-
-				case 4: { // "Segment mapping to delta values"
-					const segCount = buf.u16 / 2;
-					buf.seekr(6); // skip binary search params
-					characterMap.segments = [];
-					for (let s=0; s<segCount; s++)
-						characterMap.segments[s] = {end: buf.u16};
-					buf.seekr(2); // skip reservedPad
-					for (let s=0; s<segCount; s++)
-						characterMap.segments[s].start = buf.u16;
-					for (let s=0; s<segCount; s++)
-						characterMap.segments[s].idDelta = buf.u16;
-					characterMap.idRangeOffsetOffset = buf.tell();
-					for (let s=0; s<segCount; s++)
-						characterMap.segments[s].idRangeOffset = buf.u16;
-					break;
-				}
-
-				case 12: { // "Segmented coverage"
-					const numGroups = buf.u32;
-					characterMap.groups = [];
-					for (let grp=0; grp<numGroups; grp++) {
-						characterMap.groups.push({ start: buf.u32, end: buf.u32, glyphId: buf.u32 });
+	
+					case 4: { // "Segment mapping to delta values"
+						const segCount = bufE.u16 / 2;
+						bufE.seekr(6); // skip binary search params
+						encoding.segments = [];
+						for (let s=0; s<segCount; s++)
+							encoding.segments[s] = {end: bufE.u16};
+						bufE.seekr(2); // skip reservedPad
+						for (let s=0; s<segCount; s++)
+							encoding.segments[s].start = bufE.u16;
+						for (let s=0; s<segCount; s++)
+							encoding.segments[s].idDelta = bufE.u16;
+						encoding.idRangeOffsetOffset = bufE.tell();
+						for (let s=0; s<segCount; s++)
+							encoding.segments[s].idRangeOffset = bufE.u16;
+						break;
 					}
-					break;
+	
+					case 12: { // "Segmented coverage"
+						const numGroups = bufE.u32;
+						encoding.groups = [];
+						for (let grp=0; grp<numGroups; grp++) {
+							encoding.groups.push({ start: bufE.u32, end: bufE.u32, glyphId: bufE.u32 });
+						}
+						break;
+					}
+	
+					case 14: { // "Unicode Variation Sequences"
+						if (platEnc === 0x00000005) { // only valid under platEnc 0,5
+
+							//console.log("UVS!")
+							const numVarSelectorRecords = bufE.u32;
+							encoding.varSelectors = [];
+							for (let v=0; v<numVarSelectorRecords; v++) {
+								//console.log("varSelector", v)
+								const varSelector = { varSelector: bufE.u24 }, // this is the Unicode Variation Selector code point
+								      defaultUVSOffset = bufE.u32,
+								      nonDefaultUVSOffset = bufE.u32;
+
+								if (defaultUVSOffset) {
+									bufE.seek(defaultUVSOffset);
+									const count = bufE.u32;
+									varSelector.defaultUVS = [];
+									for (let r=0; r<count; r++) {
+										varSelector.defaultUVS.push({ startUnicodeValue: bufE.u24, additionalCount: bufE.u8 });
+									}
+
+								}
+								
+								if (nonDefaultUVSOffset) {
+									bufE.seek(nonDefaultUVSOffset);
+									const count = bufE.u32;
+									varSelector.nonDefaultUVS = [];
+									for (let r=0; r<count; r++) {
+										varSelector.nonDefaultUVS.push({ unicodeValue: bufE.u24, glyphID: bufE.u16 });
+									}
+								}
+
+								encoding.varSelectors.push(varSelector);
+							}
+						}
+						break;
+					}
 				}
 
-				default:
-					console.log(`Warning: Not handling cmap format ${characterMap.format}`);
-					break;
+				uniqueEncodings[encodingRecord.subtableOffset] = encoding;
 			}
-			cmap.characterMap = characterMap;
+			else {
+				// cached
+				console.log("cached", platEnc.toString(16).padStart(8, "0"), encodingRecord.subtableOffset);
+			}
+			cmap.encodings[platEnc] = uniqueEncodings[encodingRecord.subtableOffset];
 		}
 	},
 
@@ -875,6 +911,55 @@ const TABLE_DECODERS = {
 		}
 		while (g<font.maxp.numGlyphs) {
 			vmtx[g++] = vmtx[numOfLongVerMetrics-1];
+		}
+	},
+
+	"GSUB": (font, buf) => {
+		// decode GSUB
+		// https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
+		const gsub = font.GSUB;
+		gsub.version = [buf.u16, buf.u16]; // [0] is majorVersion, [1] is minorVersion
+		if (gsub.version[0] == 1) {
+			gsub.scriptListOffset = buf.u16;
+			gsub.featureListOffset = buf.u16;
+			gsub.lookupListOffset = buf.u16;
+			if (gsub.version[1] >= 1) {
+				gsub.featureVariationsOffset = buf.u32;
+			}
+		}
+	},
+
+	"GPOS": (font, buf) => {
+		// decode GPOS
+		// https://learn.microsoft.com/en-us/typography/opentype/spec/gpos
+		const gpos = font.GPOS;
+		gpos.version = [buf.u16, buf.u16]; // [0] is majorVersion, [1] is minorVersion
+		if (gpos.version[0] == 1) {
+			gpos.scriptListOffset = buf.u16;
+			gpos.featureListOffset = buf.u16;
+			gpos.lookupListOffset = buf.u16;
+			if (gpos.version[1] >= 1) {
+				gpos.featureVariationsOffset = buf.u32;
+			}
+		}
+	},
+
+	"GDEF": (font, buf) => {
+		// decode GDEF
+		// https://learn.microsoft.com/en-us/typography/opentype/spec/gdef
+		const gdef = font.GDEF;
+		gdef.version = [buf.u16, buf.u16]; // [0] is majorVersion, [1] is minorVersion
+		if (gdef.version[0] == 1) {
+			gdef.glyphClassDefOffset = buf.u16;
+			gdef.attachListOffset = buf.u16;
+			gdef.ligCaretListOffset = buf.u16;
+			gdef.markAttachClassDefOffset = buf.u16;
+			if (gdef.version[1] >= 2) {
+				gdef.markGlyphSetsDefOffset = buf.u16;
+			}
+			if (gdef.version[1] >= 3) {
+				gdef.itemVarStoreOffset = buf.u32;
+			}
 		}
 	},
 }
@@ -3349,10 +3434,9 @@ function SamsaFont(buf, options = {}) {
 			console.log("Loading table: ", tag);
 			const tbuf = this.bufferFromTable(tag); // wouldn’t it be a good idea to store all these buffers as font.avar.buffer, font.COLR.buffer, etc. ?
 
-			// decode first part of table
-			if (FORMATS[tag]) {
-				this[tag] = tbuf.decode(FORMATS[tag]);
-			}
+			// decode first part of table (or create an empty object)
+			this[tag] = FORMATS[tag] ? tbuf.decode(FORMATS[tag]) : {};
+			this[tag].buffer = tbuf;
 
 			// decode more of the table
 			if (this.tableDecoders[tag]) {
@@ -3485,56 +3569,72 @@ SamsaFont.prototype.loadGlyphById = function (id) {
 SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 
 	const cmap = this.cmap;
-	const characterMap = cmap.characterMap;
-	const tbuf = this.bufferFromTable("cmap");
+	const tbuf = this.cmap.buffer;
 	let g=0;
 
-	switch (characterMap.format) {
+	// which encoding shall we use?
+	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000003]; // try encodings in this order
 
-		case 1: { // "Byte encoding table"
-			//g = characterMap.mapping[uni] ?? 0;
-			g = characterMap.mapping[uni] ? characterMap.mapping[uni] : 0;
+	let encoding;
+	let ee, ff;
+	for (let e=0; e<encodingsOrder.length; e++) {
+		if (cmap.encodings[encodingsOrder[e]]) {
+			encoding = cmap.encodings[encodingsOrder[e]];
+			ee = e;
+			ff = encodingsOrder[e];
 			break;
 		}
+	}
+	
+	if (encoding) {
+		switch (encoding.format) {
 
-		case 4: { // "Segment mapping to delta values"
-			// algo: https://learn.microsoft.com/en-us/typography/opentype/spec/cmap#format-4-segment-mapping-to-delta-values
-			let s, segment;
-			for (s=0; s<characterMap.segments.length; s++) { // this could be a binary search
-				segment = characterMap.segments[s];
-				if (uni >= segment.start && uni <= segment.end) {
-					break;
-				}
+			case 1: { // "Byte encoding table"
+				//g = encoding.mapping[uni] ?? 0;
+				g = encoding.mapping[uni] ? encoding.mapping[uni] : 0;
+				break;
 			}
 
-			if (s < characterMap.segments.length - 1) {
-				if (segment.idRangeOffset) {
-					tbuf.seek(characterMap.idRangeOffsetOffset + s * 2 + segment.idRangeOffset + (uni - segment.start) * 2);
-					g = tbuf.u16;
-					if (g > 0)
-						g += segment.idDelta;
+			case 4: { // "Segment mapping to delta values"
+				// algo: https://learn.microsoft.com/en-us/typography/opentype/spec/cmap#format-4-segment-mapping-to-delta-values
+				let s, segment;
+				console.log("Yes format 4")
+				for (s=0; s<encoding.segments.length; s++) { // ideally this would be a binary search
+					segment = encoding.segments[s];
+					if (uni >= segment.start && uni <= segment.end) {
+						break;
+					}
 				}
-				else {
-					g = uni + segment.idDelta;
-				}								
-				g %= 0x10000;
+
+				if (s < encoding.segments.length - 1) {
+					if (segment.idRangeOffset) {
+						tbuf.seek(encoding.idRangeOffsetOffset + s * 2 + segment.idRangeOffset + (uni - segment.start) * 2);
+						g = tbuf.u16;
+						if (g > 0)
+							g += segment.idDelta;
+					}
+					else {
+						g = uni + segment.idDelta;
+					}								
+					g %= 0x10000;
+				}
+				break;
 			}
-			break;
+
+			case 12: { // "Segmented coverage"
+				for (let grp=0; grp<encoding.groups.length; grp++) {
+					const group = encoding.groups[grp];
+					if (uni >= group.start && uni <= group.end) {
+						g = group.glyphId + uni - group.start;
+						break;
+					}
+				}
+				break;
+			}
+
+			default:
+				break;
 		}
-
-		case 12: { // "Segmented coverage"
-			for (let grp=0; grp<characterMap.groups.length; grp++) {
-				const group = characterMap.groups[grp];
-				if (uni >= group.start && uni <= group.end) {
-					g = group.glyphId + uni - group.start;
-					break;
-				}
-			}
-			break;
-		}
-
-		default:
-			break;
 	}
 
 	return g;
@@ -4986,6 +5086,438 @@ SamsaGlyph.prototype.svg = function (context={}) {
 
 	svgString += `\n</g>`;
 	return svgString; // shall we just leave it like this?
+}
+
+// SamsaFont.glyphRunGSUB()
+// - process a glyph run with GSUB
+// - inputRun is an array of glyph ids
+// - featureTags is an array of the active features, e.g. ["liga", "rvrn", "ss01"]
+// - return value is the output run (an array of glyph ids)
+// Docs:
+// - GSUB spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
+// - OpenType Layout Common Table Formats: https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
+// - Excellent discussion on feature/lookup processing order: https://typedrawers.com/discussion/3436/order-of-execution-of-opentype-features
+SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm","ccmp","locl","mark","mkmk","rlig","calt","clig","curs","dist","kern","liga","rclt","rvrn"], tuple) {
+
+	const
+		RIGHT_TO_LEFT             = 0x0001,
+		IGNORE_BASE_GLYPHS        = 0x0002,
+		IGNORE_LIGATURES          = 0x0004,
+		IGNORE_MARKS              = 0x0008,
+		USE_MARK_FILTERING_SET    = 0x0010,
+		MARK_ATTACHMENT_TYPE_MASK = 0xFF00;
+
+	// tuple must be an array of Numbers, so fix if badly formed
+	if (this.fvar) {
+		if (tuple === undefined || !Array.isArray(tuple) || tuple.length !== this.fvar.axisCount || tuple.some(v => typeof v !== "number")) {
+			tuple = Array(this.fvar.axisCount).fill(0);
+		}
+	}
+
+	// general setup
+	const gsub = this.GSUB;
+	if (!gsub) return inputRun; // no GSUB table
+	const buf = gsub.buffer;
+	let run = [...inputRun]; // initialize the run array, which will mutate to become the output run that we return from the function
+
+	// lookups setup
+	const lookups = [];
+	buf.seek(gsub.lookupListOffset);
+	const lookupCount = buf.u16;
+
+	// get a structure of active features
+	const features = [];
+	buf.seek(gsub.featureListOffset);
+	const featureCount = buf.u16;
+	for (let f=0; f<featureCount; f++) {
+		features.push({
+			tag: buf.tag,
+			offset: buf.u16,
+			featureParams: {},
+			lookupListIndices: [],
+			lookups: [],
+		}); // we could use a sparse array if we know a feature is not used
+	}
+
+	// get Feature Variations
+	const featureVariations = [];
+	if (gsub.featureVariationsOffset) {
+		buf.seek(gsub.featureVariationsOffset);
+		const version = [buf.u16, buf.u16];
+		if (version[0] === 1 && version[1] === 0) {
+			const featureVariationRecordCount = buf.u32;
+			let tell = buf.tell(); // init tell
+			for (let fvr=0; fvr<featureVariationRecordCount; fvr++) {
+				buf.seek(tell); // return to tell
+				const featureVariation = { conditions: [], substitutions: [] };
+				const conditionSetOffset = buf.u32;
+				const featureTableSubstitutionOffset = buf.u32;
+				tell = buf.tell(); // store current pos so we can return to it next time around the loop
+
+				// get conditions
+				if (conditionSetOffset) {
+					buf.seek(gsub.featureVariationsOffset + conditionSetOffset);
+					const count = buf.u16;
+					const conditionOffsets = [];
+					for (let c=0; c<count; c++) {
+						conditionOffsets.push(buf.u32);
+					}
+					conditionOffsets.forEach(offset => {
+						buf.seek(gsub.featureVariationsOffset + conditionSetOffset + offset);
+						const format = buf.u16;
+						if (format === 1) {
+							featureVariation.conditions.push({ axisIndex: buf.u16, min: buf.f214, max: buf.f214 }); // axisIndex, filterRangeMinValue, filterRangeMaxValue
+						}
+					});
+				}
+
+				// get substitutions
+				if (featureTableSubstitutionOffset) {
+					buf.seek(gsub.featureVariationsOffset + featureTableSubstitutionOffset);
+					const version = [buf.u16, buf.u16];
+					if (version[0] === 1 && version[1] === 0) {
+						const count = buf.u16;
+						let tell2 = buf.tell(); // init tell2
+						for (let fts=0; fts<count; fts++) {
+							buf.seek(tell2); // return to tell2
+							const substitution = { featureIndex: buf.u16, lookups: [] };
+							const alternateFeatureOffset = buf.u32;
+							tell2 = buf.tell(); // store current pos as tell2 so we can return to it next time around the loop
+							buf.seek(gsub.featureVariationsOffset + featureTableSubstitutionOffset + alternateFeatureOffset);
+							buf.seekr(2); // featureParams, always 0
+							const lookupCount = buf.u16;
+							for (let lu=0; lu<lookupCount; lu++) {
+								substitution.lookups.push(buf.u16);
+							}
+							featureVariation.substitutions.push(substitution);
+						}
+					}	
+				}
+
+				// store this featureVariation
+				featureVariations.push(featureVariation);
+			}
+		}
+	}
+
+	// go thru each feature, creating lookups and assining lookup ids to each feature
+	features.forEach(feature => {
+		buf.seek(gsub.featureListOffset + feature.offset);
+		feature.featureParamsOffset = buf.u16;
+		const lookupIndexCount = buf.u16;
+		for (let i=0; i<lookupIndexCount; i++) {
+			feature.lookupListIndices.push(buf.u16);
+		}
+		feature.lookupListIndices.forEach(lookupListIndex => {
+			if (lookupListIndex < lookupCount) {
+				if (!lookups[lookupListIndex]) {
+					buf.seek(gsub.lookupListOffset + 2 + 2 * lookupListIndex);
+					const lookupOffset = buf.u16;
+					buf.seek(gsub.lookupListOffset + lookupOffset);
+
+					const lookup = {
+						type: buf.u16,
+						flag: buf.u16,
+						subtableOffsets: [],
+						subtables: [],
+					}
+					const subTableCount = buf.u16;
+					for (let t=0; t<subTableCount; t++) {
+						lookup.subtableOffsets.push(buf.u16);
+					}
+
+					lookup.subtableOffsets.forEach(sto => {
+						const subtableOffset = gsub.lookupListOffset + lookupOffset + sto;
+						buf.seek(subtableOffset);
+						const subtable = {
+							format: buf.u16,
+						}
+						if (lookup.type <= 4) {
+
+							const coverageOffset = buf.u16;
+							switch (lookup.type) {
+
+								// LookupType 1: Single Substitution Subtable
+								case 1: {
+									switch (subtable.format) {
+										case 1: {
+											subtable.deltaGlyphID = buf.i16; // note i16
+											break;
+										}
+
+										case 2: {
+											const glyphCount = buf.u16;
+											subtable.substituteGlyphIDs = [];
+											for (let g=0; g<glyphCount; g++) {
+												subtable.substituteGlyphIDs.push(buf.u16);
+											}
+											break;
+										}
+									}
+									break;
+								}
+
+								// LookupType 2: Multiple Substitution Subtable
+								case 2: {
+									if (subtable.format == 1) {
+										const sequenceCount = buf.u16;
+										const sequenceOffsets = [];
+										subtable.sequences = [];
+										for (let s=0; s<sequenceCount; s++) {
+											sequenceOffsets.push(buf.u16);
+										}
+										sequenceOffsets.forEach(offset => {
+											buf.seek(subtableOffset + offset);
+											const sequence = [];
+											const glyphCount = buf.u16;
+											for (let g=0; g<glyphCount; g++) {
+												sequence.push(buf.u16);
+											}
+											subtable.sequences.push(sequence);
+										});
+										break;
+									}
+									break;
+								}
+
+								// LookupType 3: Alternate Substitution Subtable
+								case 3: {
+									if (subtable.format == 1) {
+										const alternateSetCount = buf.u16;
+										const alternateSetOffsets = [];
+										subtable.alternateGlyphIDs = [];
+										for (let a=0; a<alternateSetCount; a++) {
+											alternateSetOffsets.push(buf.u16);
+										}
+										alternateSetOffsets.forEach(offset => {
+											buf.seek(subtableOffset + offset);
+											const glyphCount = buf.u16;
+											for (let g=0; g<glyphCount; g++) {
+												subtable.alternateGlyphIDs.push(buf.u16);
+											}
+										});
+									}
+									break;
+								}
+
+								// LookupType 4: Ligature Substitution Subtable
+								case 4: {
+									if (subtable.format == 1) {
+										const ligSetCount = buf.u16; // a ligature set is a set of ligatures that share the same first glyph (e.g. ffl, ff, fi, fl)
+										const ligSetOffsets = [];
+										subtable.ligatureSets = []; // there is one ligatureSet per covered glyph
+										for (let ls=0; ls<ligSetCount; ls++) {
+											ligSetOffsets.push(buf.u16);
+										}
+										ligSetOffsets.forEach(offset => {
+											buf.seek(subtableOffset + offset);
+											const ligSet = [];
+											const ligCount = buf.u16;
+											const ligOffsets = [];
+											for (let li=0; li<ligCount; li++) {
+												ligOffsets.push(buf.u16);
+											}
+											ligOffsets.forEach(offset2 => {
+												buf.seek(subtableOffset + offset + offset2);
+												const lig = {
+													ligatureGlyph: buf.u16,
+													componentGlyphIDs: [],
+												};
+												const componentCount = buf.u16 - 1; // note -1, since componentCount includes the initial glyph
+												for (let g=0; g<componentCount; g++) {
+													lig.componentGlyphIDs.push(buf.u16);
+												}
+												ligSet.push(lig);
+											});											
+											subtable.ligatureSets.push(ligSet);
+										});
+									}
+									break;
+								}
+							}
+
+							// get coverage for this lookup
+							buf.seek(subtableOffset + coverageOffset);
+							const coverageFormat = buf.u16;
+							subtable.coverage = { format: coverageFormat };
+							switch (coverageFormat) {
+								case 1: {
+									const glyphCount = buf.u16;
+									subtable.coverage.glyphArray = [];
+									for (let g=0; g<glyphCount; g++) {
+										subtable.coverage.glyphArray.push(buf.u16);
+									}
+									break;
+								}
+								case 2: {
+									const rangeCount = buf.u16;
+									subtable.coverage.glyphRanges = [];
+									for (let r=0; r<rangeCount; r++) {
+										subtable.coverage.glyphRanges.push({
+											startGlyphID: buf.u16,
+											endGlyphID: buf.u16,
+											startCoverageIndex: buf.u16,
+										});
+									}
+									break;
+								}
+							}
+						}
+						lookup.subtables.push(subtable);
+					})
+
+					if (lookup.flag & USE_MARK_FILTERING_SET) lookup.markFilteringSet = buf.u16;
+					lookups[lookupListIndex] = lookup;
+				}
+				feature.lookups.push(lookups[lookupListIndex]);
+			}
+		})
+	});
+
+	// now we are live
+
+	// get lookups required for featureVariations
+	// - at some point we need to handle rclt as "late" and rvrn as "early"
+	const feaVarLookups = [];
+	featureVariations.forEach(featureVariation => {
+
+		console.log("Processing featureVariation", featureVariation);
+
+		let conditionsMet = true; // this also handles the case with no conditions
+		for (let c=0; c < featureVariation.conditions.length; c++) {
+			const condition = featureVariation.conditions[c];
+			if (tuple[condition.axisIndex] < condition.min || tuple[condition.axisIndex] > condition.max) {
+				conditionsMet = false;
+				break;
+			}
+		}
+
+		// we are checking the conditions first, then the features
+		// but it might be more efficient to check the features first, then the conditions...
+		if (conditionsMet) {
+			featureVariation.substitutions.forEach(substitution => {
+				const feature = features[substitution.featureIndex];
+				if (featureTags.includes(feature.tag)) { // e.g. is "rvrn" in the list of active features?
+					feaVarLookups.push(...substitution.lookups);
+				}
+			});
+		}
+	});
+
+	// basically we will prepend (rvrn) or append (rclt) some lookups to the set of lookups below
+	// we decide which lookups to add based on the conditions
+
+
+
+
+	// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
+	// During text processing, a client applies a feature to some sequence of glyphs for a string. It then processes 
+	// the lookups referenced by that feature in their lookup list order. For each lookup, the client processes that 
+	// lookup over each glyph in the sequence to which the feature has been applied. After that lookup has been processed 
+	// for each glyph in the sequence, it then processes the next lookup referenced by the feature in the same manner. 
+	// This continues until all lookups referenced by the feature have been processed.
+
+	// prepare the lookupListIndices to use
+	let lookupListIndicesToUse = [];
+	features.forEach(feature => {
+		if (featureTags.includes(feature.tag))
+			lookupListIndicesToUse.push(...feature.lookupListIndices);
+	});
+	lookupListIndicesToUse = [...new Set(lookupListIndicesToUse)].sort((a,b) => a-b); // make unique and sort
+
+	// for each lookupList...
+	lookupListIndicesToUse.forEach(lookupListIndex => {
+
+		// now apply the lookups in this lookup list
+		const lookup = lookups[lookupListIndex];
+
+		// go thru the glyphs in the glyph run for this lookupList
+		let r=0;
+		while (r < run.length) { // note that run and run.length can be modified in the loop...
+			const g = run[r];
+			
+			// check for coverage
+			let coverageIndex = -1;
+			for (let lo=0; lo<lookup.subtables.length; lo++) {
+
+				const subtable = lookup.subtables[lo];
+
+				// only handle lookup types 1 to 4 for the time being
+				if (lookup.type <= 4) {
+
+					// is glyph g covered by this subtable?
+					if (subtable.coverage.format == 1) {
+						coverageIndex = subtable.coverage.glyphArray.indexOf(g);
+					}
+					else if (subtable.coverage.format == 2) {
+						for (let ra=0; ra<subtable.coverage.glyphRanges.length; ra++) {
+							const range = subtable.coverage.glyphRanges[ra];
+							if (g >= range.startGlyphID && g <= range.endGlyphID) {
+								coverageIndex = range.startCoverageIndex + g - range.startGlyphID;
+								break;
+							}
+						}
+					}
+
+					// if g was found, we’ll now have a coverageIndex
+					if (coverageIndex !== -1) {
+
+						// Type 1: single substitution
+						if (lookup.type == 1) {
+							if (subtable.format == 1) {
+								run[r] = (run[r] + subtable.deltaGlyphID + 0x10000) % 0x10000; // mutate the run
+							}
+							else if (subtable.format == 2) {
+								run[r] = subtable.substituteGlyphIDs[coverageIndex];  // mutate the run
+							}
+						}
+
+						// Type 2: multiple substitution
+						else if (lookup.type == 2 && subtable.format == 1) {
+							// YES: mutate the run! Note that r must be corrected
+							const seq = subtable.sequences[coverageIndex];
+							run.splice(r, 1, ...seq); // splice in an array (note that we are replacing one glyph)
+							r += seq.length - 1; // -1 because we are replacing one glyph (e.g. if the substitition sequence is length=1, then r is already pointing at the correct place)
+						}
+
+						// Type 3: alternate substitution
+						// - we need to know which alternate to use
+						// - needs the collaboration of an application and an api to request particular alternates by id
+						else if (lookup.type == 3 && subtable.format == 1) {
+
+						}
+		
+						// Type 4: ligature substitution
+						// - we check if this and the following glyphs form a ligature
+						// - we find the first match (if any) in the ligatures of this ligature set
+						else if (lookup.type == 4 && subtable.format == 1) {
+							let found = false;
+							for (let ls=0; ls<subtable.ligatureSets.length && !found; ls++) {
+								const ligSet = subtable.ligatureSets[ls];
+								for (let li=0; li<ligSet.length && !found; li++) {
+									const lig = ligSet[li];
+									const seq = lig.componentGlyphIDs;
+									if (r + seq.length < run.length) { // allows early exit, and avoids a check in the loop
+										let d = 0;
+										while (d < seq.length && seq[d] === run[r+d+1]) { // order is important
+											d++;
+										}
+										if (d === seq.length) { // did we find a ligature?
+											// YES: mutate the run! Note that r does not need to be corrected: in "office", r=1 before the "ffi" ligature substitution, and r=1 (correctly) after the ligature substitution, so next glyph will be "c"
+											run.splice(r, seq.length+1, lig.ligatureGlyph); // splice a glyphID into the array, replacing seq.length+1 items at position r
+											found = true; // breaks out of both loops
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			r++;
+		}
+	});
+	return run;
 }
 
 
