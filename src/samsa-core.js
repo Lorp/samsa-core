@@ -3576,12 +3576,9 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000003]; // try encodings in this order
 
 	let encoding;
-	let ee, ff;
 	for (let e=0; e<encodingsOrder.length; e++) {
 		if (cmap.encodings[encodingsOrder[e]]) {
 			encoding = cmap.encodings[encodingsOrder[e]];
-			ee = e;
-			ff = encodingsOrder[e];
 			break;
 		}
 	}
@@ -3598,8 +3595,7 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 			case 4: { // "Segment mapping to delta values"
 				// algo: https://learn.microsoft.com/en-us/typography/opentype/spec/cmap#format-4-segment-mapping-to-delta-values
 				let s, segment;
-				console.log("Yes format 4")
-				for (s=0; s<encoding.segments.length; s++) { // ideally this would be a binary search
+				for (s=0; s<encoding.segments.length; s++) { // ideally this would be a binary search on segment.end (and could quite easily be done directly on the undecoded blob)
 					segment = encoding.segments[s];
 					if (uni >= segment.start && uni <= segment.end) {
 						break;
