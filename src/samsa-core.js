@@ -643,19 +643,21 @@ const TABLE_DECODERS = {
 
 							//console.log("UVS!")
 							const numVarSelectorRecords = bufE.u32;
-							encoding.varSelectors = [];
+							encoding.varSelectors = {};
+
+							// we index varSelectors by their varSelector
 							for (let v=0; v<numVarSelectorRecords; v++) {
-								//console.log("varSelector", v)
-								const varSelector = { varSelector: bufE.u24 }, // this is the Unicode Variation Selector code point
-								      defaultUVSOffset = bufE.u32,
-								      nonDefaultUVSOffset = bufE.u32;
+								const varSelector = bufE.u24;
+								const defaultUVSOffset = bufE.u32;
+								const nonDefaultUVSOffset = bufE.u32;
+								const defaultUVS = [];
+								const nonDefaultUVS = [];
 
 								if (defaultUVSOffset) {
 									bufE.seek(defaultUVSOffset);
 									const count = bufE.u32;
-									varSelector.defaultUVS = [];
 									for (let r=0; r<count; r++) {
-										varSelector.defaultUVS.push({ startUnicodeValue: bufE.u24, additionalCount: bufE.u8 });
+										defaultUVS.push({ startUnicodeValue: bufE.u24, additionalCount: bufE.u8 });
 									}
 
 								}
@@ -663,13 +665,18 @@ const TABLE_DECODERS = {
 								if (nonDefaultUVSOffset) {
 									bufE.seek(nonDefaultUVSOffset);
 									const count = bufE.u32;
-									varSelector.nonDefaultUVS = [];
 									for (let r=0; r<count; r++) {
-										varSelector.nonDefaultUVS.push({ unicodeValue: bufE.u24, glyphID: bufE.u16 });
+										nonDefaultUVS.push({ unicodeValue: bufE.u24, glyphID: bufE.u16 });
 									}
 								}
 
-								encoding.varSelectors.push(varSelector);
+								//encoding.varSelectors.push(varSelector);
+								encoding.varSelectors[varSelector] = {
+									defaultUVS: defaultUVS,
+									nonDefaultUVS: nonDefaultUVS,
+								};
+
+								// so now, we have e.g. varSelector == 0xfe0f, encoding.varSelectors[0xfe0f].defaultUVS == an array of { startUnicodeValue, additionalCount }
 							}
 						}
 						break;
@@ -5084,16 +5091,83 @@ SamsaGlyph.prototype.svg = function (context={}) {
 	return svgString; // shall we just leave it like this?
 }
 
+
+SamsaFont.prototype.glyphLayoutFromString2 = function (string, userFeatures, userTuple) {
+
+	const cmap = this.cmap;
+
+	// find regular encoding and uvs encoding
+	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000003]; // order of preference for cmap encodings
+	const skinTones = [0x1f3fb, 0x1f3fc, 0x1f3fd, 0x1f3fe, 0x1f3ff]; // Fitzpatrick skin tone Emoji modifiers
+	const glyphRun = [];
+
+	let encoding;
+	for (let e=0; e<encodingsOrder.length; e++) {
+		if (cmap.encodings[encodingsOrder[e]]) {
+			encoding = cmap.encodings[encodingsOrder[e]];
+			break;
+		}
+	}
+	const uvsEncoding = cmap.encodings[0x00000005];
+
+	// main loop
+	const characters = [...string];
+	for (let c=0; c < characters.length; c++) {
+		const char = characters[c]; // current character
+		const uni = char.codePointAt(0); // current codepoint, an integer <= 0x10FFFF
+		
+		// variation selectors: let’s ignore them (we don’t want .notdef to be displayed)
+		if (uni >= 0xfe00 && uni <= 0xfe0f) {
+			// console.log("Variation selector", uni);
+			continue;
+		}
+
+		if (uni == 0x200d) {// ZWJ
+			//console.log("ZWJ");
+		}
+
+		if (skinTones.includes(uni)) {
+			//console.log("Skin tone modifier", uni);
+		}
+
+		// variation sequences can force emoji or text presentation
+		if (uvsEncoding && uvsEncoding.format === 14 && c < characters.length - 1) { // possible Unicode Variation Selector follows
+			//console.log("possible Unicode Variation Sequence");
+		}
+
+		glyphRun.push(this.glyphIdFromUnicode(uni));
+	}
+
+	// process the glyph run in GSUB and GPOS
+	const glyphRunGSUB = this.glyphRunGSUB(glyphRun, userFeatures, userTuple);
+	const glyphRunGPOS = this.glyphRunGPOS(glyphRunGSUB, userFeatures, userTuple); // adds position info
+	return glyphRunGPOS;
+}
+
+
+// SamsaFont.glyphRunGSUB()
+// - process a glyph run with GPOS
+// - returns a glyph layout array: each item has glyphId, x, y
+SamsaFont.prototype.glyphRunGPOS = function (inputRun, userFeatures, userTuple) {
+
+	// nothing yet
+
+	return inputRun;
+}
+
+
+
 // SamsaFont.glyphRunGSUB()
 // - process a glyph run with GSUB
 // - inputRun is an array of glyph ids
-// - featureTags is an array of the active features, e.g. ["liga", "rvrn", "ss01"]
+// // - featureTags is an array of the active features, e.g. ["liga", "rvrn", "ss01"]
+// userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
 // - return value is the output run (an array of glyph ids)
 // Docs:
 // - GSUB spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
 // - OpenType Layout Common Table Formats: https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
 // - Excellent discussion on feature/lookup processing order: https://typedrawers.com/discussion/3436/order-of-execution-of-opentype-features
-SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm","ccmp","locl","mark","mkmk","rlig","calt","clig","curs","dist","kern","liga","rclt","rvrn"], tuple) {
+SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 
 	const
 		RIGHT_TO_LEFT             = 0x0001,
@@ -5102,6 +5176,26 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 		IGNORE_MARKS              = 0x0008,
 		USE_MARK_FILTERING_SET    = 0x0010,
 		MARK_ATTACHMENT_TYPE_MASK = 0xFF00;
+
+	const defaultFeatures = {
+		rvrn: true, // process early
+		abvm: true,
+		blwm: true,
+		ccmp: true,
+		locl: true,
+		mark: true,
+		mkmk: true,
+		rlig: true,
+		calt: true,
+		clig: true,
+		curs: true,
+		dist: true,
+		kern: true,
+		liga: true,
+		rclt: true, // process late
+		// user features may be inserted here if undefined, above if overriding default
+	}
+	userFeatures = Object.assign(defaultFeatures, userFeatures);
 
 	// tuple must be an array of Numbers, so fix if badly formed
 	if (this.fvar) {
@@ -5121,7 +5215,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 	buf.seek(gsub.lookupListOffset);
 	const lookupCount = buf.u16;
 
-	// get a structure of active features
+	// get a structure of features in this font
 	const features = [];
 	buf.seek(gsub.featureListOffset);
 	const featureCount = buf.u16;
@@ -5301,7 +5395,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 									if (subtable.format == 1) {
 										const ligSetCount = buf.u16; // a ligature set is a set of ligatures that share the same first glyph (e.g. ffl, ff, fi, fl)
 										const ligSetOffsets = [];
-										subtable.ligatureSets = []; // there is one ligatureSet per covered glyph
+										subtable.ligatureSets = []; // there is one ligatureSet per covered glyph, so later we can use coverageIndex to find the correct ligatureSet
 										for (let ls=0; ls<ligSetCount; ls++) {
 											ligSetOffsets.push(buf.u16);
 										}
@@ -5324,7 +5418,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 													lig.componentGlyphIDs.push(buf.u16);
 												}
 												ligSet.push(lig);
-											});											
+											});
 											subtable.ligatureSets.push(ligSet);
 										});
 									}
@@ -5415,11 +5509,14 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 
 	// prepare the lookupListIndices to use
 	let lookupListIndicesToUse = [];
+
+	// TODO: fix the order of execution of features
 	features.forEach(feature => {
-		if (featureTags.includes(feature.tag))
+		//if (featureTags.includes(feature.tag))
+		if (userFeatures[feature.tag])
 			lookupListIndicesToUse.push(...feature.lookupListIndices);
 	});
-	lookupListIndicesToUse = [...new Set(lookupListIndicesToUse)].sort((a,b) => a-b); // make unique and sort
+	lookupListIndicesToUse = [...new Set(lookupListIndicesToUse)].sort((a,b) => a-b); // make unique and sort // TODO: hmmmm this sort()
 
 	// for each lookupList...
 	lookupListIndicesToUse.forEach(lookupListIndex => {
@@ -5428,8 +5525,9 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 		const lookup = lookups[lookupListIndex];
 
 		// go thru the glyphs in the glyph run for this lookupList
-		let r=0;
-		while (r < run.length) { // note that run and run.length can be modified in the loop...
+		const glyphsNotCovered = {}; // TODO: keep track of glyphs that are not handled by any lookups, so we can avoid testing for them more than once; maybe have it as glyphLookups arrays (e.g. { glyph123: [ lookup1, lookup7, lookup33 ], glyph8: null } ) so each glyph can lookup which lookups it’s handled by (if any), so no need to search thru all lookups
+		for (let r=0; r < run.length; r++) { // note that we modify in the loop: r, run, run.length
+			
 			const g = run[r];
 			
 			// check for coverage
@@ -5484,24 +5582,23 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 						}
 		
 						// Type 4: ligature substitution
-						// - we check if this and the following glyphs form a ligature
-						// - we find the first match (if any) in the ligatures of this ligature set
+						// - check if this and the following glyphs form a ligature: we know the ligature set by the coverageIndex
+						// - find the first match (if any) in the ligatures of this ligature set
 						else if (lookup.type == 4 && subtable.format == 1) {
-							let found = false;
-							for (let ls=0; ls<subtable.ligatureSets.length && !found; ls++) {
-								const ligSet = subtable.ligatureSets[ls];
-								for (let li=0; li<ligSet.length && !found; li++) {
+							const ligSet = subtable.ligatureSets[coverageIndex]; // "A LigatureSet table, one for each covered glyph, specifies all the ligature strings that begin with the covered glyph."
+							if (ligSet) { // always true in valid fonts
+								for (let li=0; li<ligSet.length; li++) {
 									const lig = ligSet[li];
 									const seq = lig.componentGlyphIDs;
 									if (r + seq.length < run.length) { // allows early exit, and avoids a check in the loop
 										let d = 0;
-										while (d < seq.length && seq[d] === run[r+d+1]) { // order is important
+										while (d < seq.length && seq[d] === run[r+d+1]) {
 											d++;
 										}
 										if (d === seq.length) { // did we find a ligature?
 											// YES: mutate the run! Note that r does not need to be corrected: in "office", r=1 before the "ffi" ligature substitution, and r=1 (correctly) after the ligature substitution, so next glyph will be "c"
-											run.splice(r, seq.length+1, lig.ligatureGlyph); // splice a glyphID into the array, replacing seq.length+1 items at position r
-											found = true; // breaks out of both loops
+											run.splice(r, seq.length+1, lig.ligatureGlyph); // splice the ligature glyphID into the array, replacing seq.length+1 items at position r (note that r is soon incremented by 1 as usual)
+											break; // success: we can break out of the for loop // TODO: do we need to break out of the lookup subtables loop too?
 										}
 									}
 								}
@@ -5510,7 +5607,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, featureTags=["abvm","blwm
 					}
 				}
 			}
-			r++;
 		}
 	});
 	return run;
