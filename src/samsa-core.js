@@ -586,12 +586,11 @@ const TABLE_DECODERS = {
 		cmap.lookup = []; // the main cmap lookup table
 		cmap.encodings = {};
 
-		
-		buf.seek(4);
+		buf.seek(4); // get to the start of the encodingRecords array (we already read version and numTables in the template)
 
 		// step thru the encodingRecords
 		// - we only process the encodings we care about
-		const uniqueEncodings = {}; // makes sure we don’t parse the same encoding twice, in case it is referred to twice
+		const uniqueEncodings = {}; // encodings indexed by subtableOffset (if an encoding is referred to twice, we only parse it once)
 		for (let t=0; t < cmap.numTables; t++) {
 			const encodingRecord = buf.decode(FORMATS.EncodingRecord);
 			const platEnc = (encodingRecord.platformID << 16) + encodingRecord.encodingID; // store each platform/encoding pairs as one uint32 so we can easily match them
@@ -659,7 +658,6 @@ const TABLE_DECODERS = {
 									for (let r=0; r<count; r++) {
 										defaultUVS.push({ startUnicodeValue: bufE.u24, additionalCount: bufE.u8 });
 									}
-
 								}
 								
 								if (nonDefaultUVSOffset) {
@@ -670,7 +668,6 @@ const TABLE_DECODERS = {
 									}
 								}
 
-								//encoding.varSelectors.push(varSelector);
 								encoding.varSelectors[varSelector] = {
 									defaultUVS: defaultUVS,
 									nonDefaultUVS: nonDefaultUVS,
@@ -1801,11 +1798,11 @@ class SamsaBuffer extends DataView {
 		// TODO: return bytelength? it may be different from str.length*2
 	}
 
-	decodeGlyph(options={}) {
+	decodeGlyph(numBytes, options={}) {
 		
 		//const metrics = options.metrics ?? [0, 0, 0, 0];
 		const metrics = options.metrics === undefined ? [0, 0, 0, 0] : options.metrics;
-		const glyph = options.length ? new SamsaGlyph(this.decode(FORMATS.GlyphHeader)) : new SamsaGlyph();
+		const glyph = numBytes ? new SamsaGlyph(this.decode(FORMATS.GlyphHeader)) : new SamsaGlyph();
 		if (options.id)
 			glyph.id = options.id;
 
@@ -1815,8 +1812,12 @@ class SamsaBuffer extends DataView {
 			metrics[1] = glyph.font.hmtx[glyph.id];
 		}
 
+		// empty glyph
+		if (numBytes === 0) {
+		}
+
 		// simple glyph
-		if (glyph.numberOfContours > 0) {
+		else if (glyph.numberOfContours > 0) {
 
 			glyph.endPts = [];
 
@@ -3470,7 +3471,7 @@ function SamsaFont(buf, options = {}) {
 			this.buf.seek(this.tables.loca.offset + (g+1) * (this.head.indexToLocFormat ? 4 : 2));
 			const nextOffset = this.head.indexToLocFormat ? buf.u32 : buf.u16 * 2;
 			buf.seek(this.tables.glyf.offset + offset);
-			this.glyphs[g] = buf.decodeGlyph({id: g, font: this, length: nextOffset - offset});
+			this.glyphs[g] = buf.decodeGlyph(nextOffset - offset, { id: g, font: this }); // if nextOffset == offset, nothing is read from buf
 			offset = nextOffset;
 		}
 
@@ -3562,17 +3563,22 @@ SamsaFont.prototype.getVariationScalars = function (ivs, tuple) {
 	return scalars;
 }
 
-SamsaFont.prototype.loadGlyphById = function (id) {
-	this.buf.seek(this.tables.loca.offset + id * (this.head.indexToLocFormat ? 4 : 2));
-	const offset = this.head.indexToLocFormat ? [buf.u32, buf.u32] : [buf.u16 * 2, buf.u16 * 2];
-	buf.seek(this.tables.glyf.offset + offset);
-	this.glyphs[g] = buf.decodeGlyph({id: id, font: this, length: offsets[1] - offsets[0]});
+SamsaFont.prototype.loadGlyphById = function (glyphId, cache = true) {
+	const buf = this.buf;
+	buf.seek(this.tables.loca.offset + glyphId * (this.head.indexToLocFormat ? 4 : 2));
+	const offsets = this.head.indexToLocFormat ? [buf.u32, buf.u32] : [buf.u16 * 2, buf.u16 * 2];
+	buf.seek(this.tables.glyf.offset + offsets[0]);
+	const glyph = buf.decodeGlyph(offsets[1] - offsets[0], { id: glyphId, font: this });
+	if (cache) {
+		this.glyphs[glyphId] = glyph; // preserve in the glyphs array
+	}
+	return glyph;
 }
 
 // SamsaFont.glyphIdFromUnicode() – returns glyphId for a given unicode code point
 // uni: the code point
 // return: the glyphId (0 if not found)
-// Notes: Handles formats 1, 4, 12.
+// Notes: Handles formats 0, 4, 12.
 SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 
 	const cmap = this.cmap;
@@ -3580,7 +3586,7 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 	let g=0;
 
 	// which encoding shall we use?
-	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000003]; // try encodings in this order
+	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000006, 0x00000003, 0x00010000]; // try encodings in this order: [3,10], [3,1], [0,6], [0,3], [1,0]
 
 	let encoding;
 	for (let e=0; e<encodingsOrder.length; e++) {
@@ -3593,7 +3599,7 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 	if (encoding) {
 		switch (encoding.format) {
 
-			case 1: { // "Byte encoding table"
+			case 0: { // "Byte encoding table"
 				//g = encoding.mapping[uni] ?? 0;
 				g = encoding.mapping[uni] ? encoding.mapping[uni] : 0;
 				break;
@@ -3685,53 +3691,11 @@ SamsaFont.prototype.u32FromHexColor = function (hex, opacity=1) {
 	}
 }
 
-// - glyphLayout: array 
-// - return: SVG ready to use, probably with a transform and viewbox
-SamsaInstance.prototype.svgFromGlyphLayout = function (glyphLayout) {
-
-	glyphLayout.forEach(glyphInRun => {
-		const [glyphId, translate] = glyphInRun;
-	});
-	return svg;
-}
-
-
-// take an array of glyphids, and return a sequence of glyphids with layout information
-// - glyphIds: array of glyph ids
-// - return: glyphLayout, an array of objects, where each object has a glyph and an absolute xy offset
-
-// - note that we are neutral here regarding output format
-// - shouldn’t it be SamsaInstance??
-SamsaInstance.prototype.glyphLayoutFromGlyphRun = function (glyphIds) {
-
-	// we can use hmtx, vmtx, HVAR, VVAR for this
-
-	const glyphLayout = [];
-
-	const horizontalAdvance = 777;
-	const verticalAdvance = 777;
-
-	// uhh... handle OpenType Layout tables here... GSUB, GPOS, GDEF...
-
-
-	glyphIds.forEach(glyphId => {
-		
-		const layoutObj = {
-			glyph: glyphId,
-			advance: [horizontalAdvance, verticalAdvance],
-		}
-
-		glyphLayout.push(layoutObj);
-	});
-	
-	return glyphLayout;
-}
-
 
 //////////////////////////////////
 //  tupleFromFvs()
 // - fvs is an object where axis tags are keys and axis values are values
-// - returns: a tuple of length this.axisCount, with values normalized *without* avar mapping; this tuple is suitable to supply new SamsaInstance()
+// - returns: a tuple of length this.axisCount, with values normalized but *without* avar mapping; this tuple is suitable to supply new SamsaInstance()
 //////////////////////////////////
 SamsaFont.prototype.tupleFromFvs = function (fvs) {
 
@@ -3767,13 +3731,14 @@ SamsaFont.prototype.tupleFromFvs = function (fvs) {
 //-------------------------------------------------------------------------------
 // SamsaInstance
 // - font is a SamsaFont
-// - tuple is a final tuple, after processing by avar - NO IT’S NOT, IT’S THE ORIGINAL TUPLE
-function SamsaInstance(font, userTuple, options={}) {
+// - userTuple is an initial tuple, *before* processing by avar
+function SamsaInstance(font, userTuple=[], options={}) {
 
 	//console.log("In SamsaInstance creating with ", userTuple);
 	this.font = font;
 	const {avar, gvar} = font; // destructure table data objects
-	this.tuple = [...userTuple]; // any avar2 changes to tuple are preserved in the instance via this.tuple; maybe we should keep the untransformed tuple around for Samsa-style debugging etc.
+	this.userTuple = [...userTuple]; // the original tuple untransformed by avar
+	this.tuple = [...userTuple]; // this tuple gets transformed by avar
 	const tuple = this.tuple;
 	this.glyphs = [];
 	this.deltaSets = {}; // deltaSets from ItemVariationStore: keys are "MVAR", "COLR" etc. Note that each set of deltas corresponds to different types of default item.
@@ -3917,9 +3882,8 @@ function SamsaInstance(font, userTuple, options={}) {
 SamsaInstance.prototype.glyphAdvance = function (glyphId) {
 	const font = this.font;
 	const advance = [0,0];
-	const glyph = font.glyphs[glyphId];
-	const iglyph = glyph.instantiate(this);
-	// we do not need to decompose 
+	const glyph = font.glyphs[glyphId] || font.loadGlyphById(glyphId);
+	const iglyph = glyph.instantiate(this); // we do not need to decompose 
 
 	if (iglyph) {
 		// get the advance from SamsaGlyph
@@ -3943,62 +3907,6 @@ SamsaInstance.prototype.glyphAdvance = function (glyphId) {
 	return advance;
 }
 
-// input: a string or an array of glyphIds
-// - return: a GlyphRun object which is an array of objects, where each object has a glyph and an absolute xy offset
-// Examples:
-// instance.glyphLayoutFromString("hello") // gets the layout for the string "hello"
-// instance.glyphLayoutFromString([234]) // gets the layout for glyph 234
-// instance.glyphLayoutFromString([234,55]) // gets the layout for glyph 234 followed by glyph 55
-// - a complete implementation would process OpenType Layout features
-SamsaInstance.prototype.glyphLayoutFromString = function (input) {
-	const font = this.font;
-	const glyphLayout = []; // we return this
-	let glyphRun = [];
-	let x = 0, y = 0;
-
-	// get a simple array of glyphIds (if input is a string, turn it into a simple array of glyphIds)
-	if (typeof input == "string") {
-		// step through the string in a UTF-16 aware way, that is cool with "🐎🌡️❤️🤯⌚️ΝχQ";
-		[...input].forEach(ch => {
-			glyphRun.push(font.glyphIdFromUnicode(ch.codePointAt(0)));
-		})
-	}
-	else if (Array.isArray(input)) {
-		glyphRun = input;
-	}
-
-	// should this already position each glyph absolutely? maybe, to be similar to harfbuzz... simpler for the final rendering
-
-	glyphRun.forEach(glyphId => {
-
-		const [dx, dy] = this.glyphAdvance(glyphId); // glyphAdvance() is responsible for decoding and instantiating the glyph if necessary
-	
-		// emit similar format to harfbuzz
-		glyphLayout.push({
-			id: glyphId,
-			ax: x,
-			ay: y,
-			dx: dx,
-			dy: dy,
-		});
-
-		x += dx; // horizontal advance
-		y += dy; // vertical advance
-
-	});
-
-	// get the glyph ids for the characters in the string
-	
-	// process the glyphid sequence to get substitutions and positioning
-	// - we can do this with:
-	//   - harfbuzz.wasm
-	//   - opentype.js
-	//   - fontkit.js
-	//   - basic metrics, no kerning (no subsitutions)
-	//   - basis metrics, kern table (no subsitutions)
-
-	return glyphLayout;
-}
 
 
 //-------------------------------------------------------------------------------
@@ -5091,70 +4999,79 @@ SamsaGlyph.prototype.svg = function (context={}) {
 	return svgString; // shall we just leave it like this?
 }
 
-
-SamsaFont.prototype.glyphLayoutFromString2 = function (string, userFeatures, userTuple) {
-
-	const cmap = this.cmap;
-
-	// find regular encoding and uvs encoding
-	const encodingsOrder = [0x0003000a, 0x00030001, 0x00000003]; // order of preference for cmap encodings
+// SamsaInstance.glyphLayoutFromString()
+// input: a string or an array of glyphIds
+// - return: a GlyphLayout object which is an array of GlyphPlacement objects, each GlyphPlacement pointing to a glyph and an absolute xy offset
+// Examples:
+// instance.glyphLayoutFromString("hello") // gets the layout for the string "hello"
+// instance.glyphLayoutFromString("hello", { liga: false, dlig: true }) // gets the layout for the string "hello", with features liga off and dlig on
+// instance.glyphLayoutFromString([234,55]) // gets the layout for the glyph run [234,55]
+// - a complete implementation would process OpenType Layout features
+SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
+	const font = this.font;
+	const cmap = font.cmap;
+	const glyphLayout = []; // we return this
+	let glyphRun = [];
 	const skinTones = [0x1f3fb, 0x1f3fc, 0x1f3fd, 0x1f3fe, 0x1f3ff]; // Fitzpatrick skin tone Emoji modifiers
-	const glyphRun = [];
+	const uvsEncoding = cmap.encodings[0x00000005]; // find Unicode Variation Sequence encoding, if any
 
-	let encoding;
-	for (let e=0; e<encodingsOrder.length; e++) {
-		if (cmap.encodings[encodingsOrder[e]]) {
-			encoding = cmap.encodings[encodingsOrder[e]];
-			break;
-		}
+	if (Array.isArray(input)) { // input is actually an array of glyphIds
+		glyphRun = input;
 	}
-	const uvsEncoding = cmap.encodings[0x00000005];
+	else if (typeof input === "string") {
 
-	// main loop
-	const characters = [...string];
-	for (let c=0; c < characters.length; c++) {
-		const char = characters[c]; // current character
-		const uni = char.codePointAt(0); // current codepoint, an integer <= 0x10FFFF
-		
-		// variation selectors: let’s ignore them (we don’t want .notdef to be displayed)
-		if (uni >= 0xfe00 && uni <= 0xfe0f) {
-			// console.log("Variation selector", uni);
-			continue;
-		}
-
-		if (uni == 0x200d) {// ZWJ
-			//console.log("ZWJ");
-		}
-
-		if (skinTones.includes(uni)) {
-			//console.log("Skin tone modifier", uni);
-		}
-
-		// variation sequences can force emoji or text presentation
-		if (uvsEncoding && uvsEncoding.format === 14 && c < characters.length - 1) { // possible Unicode Variation Selector follows
-			//console.log("possible Unicode Variation Sequence");
-		}
-
-		glyphRun.push(this.glyphIdFromUnicode(uni));
+		// main loop to get initial glyph run
+		const characters = [...input]; // this is a Unicode codepoint array, so items are 21-bit not 16-bit (note that string.length would treat surrogate pairs as 2 characters)
+		for (let c=0; c < characters.length; c++) {
+			const char = characters[c]; // current character
+			const uni = char.codePointAt(0); // current codepoint, an integer <= 0x10FFFF
+			
+			// variation selectors: let’s ignore them (we don’t want .notdef to be displayed)
+			if (uni >= 0xfe00 && uni <= 0xfe0f) {
+				// console.log("Variation selector", uni);
+				continue;
+			}
+	
+			if (uni == 0x200d) { // ZWJ
+				//console.log("ZWJ");
+			}
+	
+			if (skinTones.includes(uni)) {
+				//console.log("Skin tone modifier", uni);
+			}
+	
+			// variation sequences can force emoji or text presentation
+			if (uvsEncoding && uvsEncoding.format === 14 && c < characters.length - 1) { // possible Unicode Variation Selector follows
+				//console.log("possible Unicode Variation Sequence");
+			}
+	
+			glyphRun.push(font.glyphIdFromUnicode(uni));
+		}	
 	}
 
-	// process the glyph run in GSUB and GPOS
-	const glyphRunGSUB = this.glyphRunGSUB(glyphRun, userFeatures, userTuple);
-	const glyphRunGPOS = this.glyphRunGPOS(glyphRunGSUB, userFeatures, userTuple); // adds position info
-	return glyphRunGPOS;
+	// process the glyph run in GSUB
+	glyphRun = font.glyphRunGSUB(glyphRun, userFeatures, this.tuple);
+
+	// get advance info for each glyph
+	let x = 0, y = 0;
+	glyphRun.forEach(glyphId => {
+		const [dx, dy] = this.glyphAdvance(glyphId); // glyphAdvance() is responsible for decoding and instantiating the glyph if necessary
+		glyphLayout.push({ id: glyphId, ax: x, ay: y, dx: dx, dy: dy }); // an array of glyphPlacement objects, similar format to harfbuzz
+		x += dx; // horizontal advance
+		y += dy; // vertical advance
+	});
+
+	// process the glyph run in GPOS
+	// - TODO
+	// const glyphShifts = font.glyphRunGPOS(glyphRun, userFeatures, this.tuple);
+	// glyphLayout.forEach((glyphPlacement, i) => {
+	// 	glyphPlacement.x += glyphShifts[i][0];
+	// 	glyphPlacement.y += glyphShifts[i][1];
+	// });
+
+	// it’s ready!
+	return glyphLayout;
 }
-
-
-// SamsaFont.glyphRunGSUB()
-// - process a glyph run with GPOS
-// - returns a glyph layout array: each item has glyphId, x, y
-SamsaFont.prototype.glyphRunGPOS = function (inputRun, userFeatures, userTuple) {
-
-	// nothing yet
-
-	return inputRun;
-}
-
 
 
 // SamsaFont.glyphRunGSUB()
