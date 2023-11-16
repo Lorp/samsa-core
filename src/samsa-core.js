@@ -5078,8 +5078,7 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 // SamsaFont.glyphRunGSUB()
 // - process a glyph run with GSUB
 // - inputRun is an array of glyph ids
-// // - featureTags is an array of the active features, e.g. ["liga", "rvrn", "ss01"]
-// userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
+// - userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
 // - return value is the output run (an array of glyph ids)
 // Docs:
 // - GSUB spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
@@ -5403,7 +5402,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 		if (conditionsMet) {
 			featureVariation.substitutions.forEach(substitution => {
 				const feature = features[substitution.featureIndex];
-				if (featureTags.includes(feature.tag)) { // e.g. is "rvrn" in the list of active features?
+				if (userFeatures[feature.tag]) { // e.g. is "rvrn" in the list of active features?
 					feaVarLookups.push(...substitution.lookups);
 				}
 			});
