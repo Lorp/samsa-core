@@ -599,8 +599,6 @@ const TABLE_DECODERS = {
 			const encoding = bufE.decode(FORMATS.CharacterEncoding);
 			if (uniqueEncodings[encodingRecord.subtableOffset] === undefined) {
 				// uncached
-				console.log("uncached", platEnc.toString(16).padStart(8, "0"), encodingRecord.subtableOffset);
-
 				switch (encoding.format) {
 
 					case 0: { // "Byte encoding table"
@@ -681,10 +679,6 @@ const TABLE_DECODERS = {
 				}
 
 				uniqueEncodings[encodingRecord.subtableOffset] = encoding;
-			}
-			else {
-				// cached
-				console.log("cached", platEnc.toString(16).padStart(8, "0"), encodingRecord.subtableOffset);
 			}
 			cmap.encodings[platEnc] = uniqueEncodings[encodingRecord.subtableOffset];
 		}
@@ -4543,6 +4537,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 	}
 
 	const font = context.font;
+	const defs = context.defs;
 	const palette = font.CPAL.palettes[context.paletteId || 0];
 	if (context.color === undefined)
 		context.color = 0x000000ff; // black
@@ -4560,11 +4555,11 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 
 		case PAINT_SHAPE: {
 			// retrieve the glyph path definition if we don't already have it, and insert it into defs
-			if (!context.defs[`p${paint.glyphID}`]) {
-				const glyph = context.font.glyphs[paint.glyphID];
+			if (!defs[`p${paint.glyphID}`]) {
+				const glyph = font.glyphs[paint.glyphID] || font.loadGlyphById(paint.glyphID);
 				const iglyph = glyph.instantiate(context.instance);
 				const path = iglyph.svgGlyphMonochrome(0);
-				context.defs[`p${paint.glyphID}`] = `<path id="p${paint.glyphID}" d="${path}"/>`;
+				defs[`p${paint.glyphID}`] = `<path id="p${paint.glyphID}" d="${path}"/>`;
 			}
 			context.lastGlyphId = paint.glyphID;
 			svg += this.paintSVG(paint.children[0], context); // there’s only one child; this should be a fill or a gradient (or maybe another PAINT_SHAPE)
@@ -4613,8 +4608,9 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 			// PaintComposite
 			if (paint.format == 32) {
 
-				console.error("Attempting PaintComposite ...");
-				console.log(paint);
+				context.paintComposites.add(this.id);
+				// console.error("Attempting PaintComposite ...");
+				// console.log(paint);
 
 				const m = paint.compositeMode;
 				const [modeType, mode] = SVG_PAINTCOMPOSITE_MODES[m]; // e.g. ["F", "atop"] for COMPOSITE_SRC_ATOP or ["M", "difference"] for COMPOSITE_DIFFERENCE
@@ -4636,13 +4632,11 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 					
 					// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/feComposite
 					case "F": {
-						defs.push(`<filter id="filter-${m}">
+						defs[`filter-${m}`] = `<filter id="filter-${m}">
 							<feImage href="#${dest}" x="0px" y="0px" width="300px" height="300px" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" />
 							<feComposite in="SourceGraphic" operator="${mode}" />
-							</filter>`);
-						svg += `<g>
-									<use href="#${src}" style="filter:url(#filter-${m})" />
-								</g>`;      
+							</filter>`;
+						svg += `<g><use href="#${src}" style="filter:url(#filter-${m})" /></g>`;      
 						break;
 					}
 					
@@ -4673,7 +4667,13 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 				if (paintFormatStatic == 2) {
 					const paletteIndex = paint.paletteIndex;
 					const color = paletteIndex == 0xffff ? context.color : palette.colors[paletteIndex];
-					svg += `<use href="#p${context.lastGlyphId}" fill="${font.hexColorFromU32(color)}"${paint.alpha !== 1 ? `fill-opacity="${paint.alpha}"` : ""}/>`; // maybe update these x and y later
+					const attrs = {
+						href: `#p${context.lastGlyphId}`,
+						fill: font.hexColorFromU32(color),
+					}
+					if (paint.alpha !== 1)
+						attrs["fill-opacity"] = paint.alpha;
+					svg += `<use${expandAttrs(attrs)}/>`;
 				}
 
 				// gradient fill
@@ -4681,7 +4681,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 					let gradientId = "g" + paint.offset; // this gets modified if there is a transform
 
 					// do we already have this gradient in the defs?
-					if (!context.defs[gradientId] || context.gradientTransform) { // we try not to repeat gradients, but we always store them if there's a transform
+					if (!defs[gradientId] || context.gradientTransform) { // we try not to repeat gradients, but we always store them if there's a transform
 
 						// we must store the gradient separatelt if it has a transform
 						if (context.gradientTransform)
@@ -4734,7 +4734,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 							// PaintSweepGradient (8), PaintVarSweepGradient (9)
 							case 8:
 								console.error("PaintSweepGradient is not implemented yet");
-								console.log(paint);
+								//console.log(paint);
 								// paint.center
 								// paint.startAngle
 								// paint.endAngle
@@ -4743,7 +4743,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 						}
 
 						// add the gradient to the defs
-						context.defs[gradientId] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;
+						defs[gradientId] = `<${gradientElement}${expandAttrs(attrs)}>${stops}</${gradientElement}>`;
 
 						// gradientTransform housekeeping
 						context.gradientTransformId++;
@@ -4777,7 +4777,7 @@ SamsaGlyph.prototype.svgGlyphCOLRv1 = function (context={}) {
 
 		const paintDag = this.paint(context);
 
-		console.log(paintDag);
+		//console.log(paintDag);
 		if (paintDag) {
 			const svgResult = this.paintSVG(paintDag, context); // we could bring the paintSVG function inside here, but there seems little point
 			return svgResult; // this is a <g> element ready to be inserted into an <svg>, but we must also remember to add the defs (paths and gradients) from the context
@@ -5015,12 +5015,8 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 	const skinTones = [0x1f3fb, 0x1f3fc, 0x1f3fd, 0x1f3fe, 0x1f3ff]; // Fitzpatrick skin tone Emoji modifiers
 	const uvsEncoding = cmap.encodings[0x00000005]; // find Unicode Variation Sequence encoding, if any
 
-	if (Array.isArray(input)) { // input is actually an array of glyphIds
-		glyphRun = input;
-	}
-	else if (typeof input === "string") {
-
-		// main loop to get initial glyph run
+	// main loop to get initial glyph run
+	if (typeof input === "string") {
 		const characters = [...input]; // this is a Unicode codepoint array, so items are 21-bit not 16-bit (note that string.length would treat surrogate pairs as 2 characters)
 		for (let c=0; c < characters.length; c++) {
 			const char = characters[c]; // current character
@@ -5047,6 +5043,11 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 	
 			glyphRun.push(font.glyphIdFromUnicode(uni));
 		}	
+	}
+
+	// input is already an array of glyphIds
+	else if (Array.isArray(input)) {
+		glyphRun = input;
 	}
 
 	// process the glyph run in GSUB
