@@ -5389,8 +5389,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 	const feaVarLookups = [];
 	featureVariations.forEach(featureVariation => {
 
-		console.log("Processing featureVariation", featureVariation);
-
 		let conditionsMet = true; // this also handles the case with no conditions
 		for (let c=0; c < featureVariation.conditions.length; c++) {
 			const condition = featureVariation.conditions[c];
