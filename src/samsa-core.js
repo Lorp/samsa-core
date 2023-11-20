@@ -3333,10 +3333,10 @@ class SamsaBuffer extends DataView {
 			this.seek(scriptListOffset + scriptOffset);
 			const defaultLangSysOffset = this.u16;
 			const script = {
-				defaultLangSys: decodeLangSys(defaultLangSysOffset),
+				defaultLangSys: defaultLangSysOffset ? decodeLangSys(defaultLangSysOffset) : null,
+				langSysRecords: [],
 			};
 			const langSysCount = this.u16;
-			script.langSysRecords = [];
 			for (let l=0; l<langSysCount; l++) {
 				const tag = this.tag, langSysOffset = this.u16;
 				const langSys = decodeLangSys(scriptOffset + langSysOffset);
