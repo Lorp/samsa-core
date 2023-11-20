@@ -925,6 +925,9 @@ const TABLE_DECODERS = {
 				gsub.featureVariationsOffset = buf.u32;
 			}
 		}
+
+		buf.seek(gsub.scriptListOffset);
+		gsub.scripts = buf.decodeScriptList();
 	},
 
 	"GPOS": (font, buf) => {
@@ -3301,6 +3304,49 @@ class SamsaBuffer extends DataView {
 
 		// return the SamsaBuffer as either a Uint8Array or a SamsaBuffer, depending on options
 		return options.Uint8Array ? finalBufferU8 : finalBuffer;
+	}
+
+	decodeScriptList() {
+
+		const decodeLangSys = langSysOffset => {
+			const tell = this.tell();
+			this.seek(scriptListOffset + langSysOffset);
+			this.seekr(2); // lookupOrderOffset (reserved, so always null)
+			const langSys = {
+				requiredFeatureIndex: this.u16,
+				featureIndices: [],
+			};
+			const featureIndexCount = this.u16;
+			for (let f=0; f<featureIndexCount; f++) {
+				langSys.featureIndices.push(this.u16);
+			}
+			this.seek(tell); // restore the data pointer
+			return langSys;
+		};
+
+		const scriptListOffset = this.tell();
+		const scripts = {}; // we’ll index by script tag
+		const scriptCount = this.u16;
+		for (let s=0; s<scriptCount; s++) {
+			const scriptTag = this.tag, scriptOffset = this.u16;
+			const tell = this.tell();
+			this.seek(scriptListOffset + scriptOffset);
+			const defaultLangSysOffset = this.u16;
+			const script = {
+				defaultLangSys: decodeLangSys(defaultLangSysOffset),
+			};
+			const langSysCount = this.u16;
+			script.langSysRecords = [];
+			for (let l=0; l<langSysCount; l++) {
+				const tag = this.tag, langSysOffset = this.u16;
+				const langSys = decodeLangSys(scriptOffset + langSysOffset);
+				script.langSysRecords[tag] = langSys;
+			}
+			scripts[scriptTag] = script;
+			this.seek(tell);
+		}
+
+		return scripts;
 	}
 
 }
