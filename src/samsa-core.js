@@ -4608,7 +4608,8 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 			// PaintComposite
 			if (paint.format == 32) {
 
-				context.paintComposites.add(this.id);
+				if (context.paintComposites) // are we recording?
+					context.paintComposites.add(this.id);
 				// console.error("Attempting PaintComposite ...");
 				// console.log(paint);
 
