@@ -5386,10 +5386,10 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		}
 	});
 
-	// convert to a single list of lookup ids, 
-	const lookupsToUse = lookupGroups[0].sort((a,b) => a-b)
-						.concat(lookupGroups[1].sort((a,b) => a-b))
-						.concat(lookupGroups[2].sort((a,b) => a-b));
+	// sort each lookup group: each lookupGroup becomes a sorted array of integers
+	lookupGroups.forEach(lookupGroup => lookupGroup.sort((a,b) => a-b));
+
+	
 
 	// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
 	// During text processing, a client applies a feature to some sequence of glyphs for a string. It then processes 
@@ -5398,8 +5398,8 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	// for each glyph in the sequence, it then processes the next lookup referenced by the feature in the same manner. 
 	// This continues until all lookups referenced by the feature have been processed.
 
-	// for each lookupList...
-	lookupsToUse.forEach(lookupIndex => {
+	// for each lookupList... (we flatten the lookup groups into a single array of integers)
+	lookupGroups.flat().forEach(lookupIndex => {
 
 		// now apply the lookups in this lookup list
 		const lookup = lookups[lookupIndex];
