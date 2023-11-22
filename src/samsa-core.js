@@ -935,13 +935,19 @@ const TABLE_DECODERS = {
 		gsub.features = [];
 		const featureCount = buf.u16;
 		for (let f=0; f<featureCount; f++) {
-			gsub.features.push({
+			const feature = {
 				tag: buf.tag,
 				offset: buf.u16,
 				featureParams: {},
 				lookupListIndices: [],
 				lookups: [],
-			});
+			};
+			const tell = buf.tell();
+			buf.seek(gsub.featureListOffset + feature.offset);
+			feature.featureParamsOffset = buf.u16;
+			feature.lookupIndices = buf.decodeLookupIndices();
+			gsub.features.push(feature);
+			buf.seek(tell);
 		}
 
 		// get lookup count
@@ -1742,6 +1748,10 @@ class SamsaBuffer extends DataView {
 			this.u16 = str.charCodeAt(c);
 		}
 		// TODO: return bytelength? it may be different from str.length*2
+	}
+
+	decodeLookupIndices() { // for GSUB/GPOS
+		return this.u16array(this.u16);
 	}
 
 	decodeGlyph(numBytes, options={}) {
@@ -5139,7 +5149,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 
 	// lookups setup (this becomes a sparse array)
 	const lookups = [];
-	
 
 	// get Feature Variations
 	const featureVariations = [];
@@ -5185,7 +5194,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 							const tell2 = buf.tell(); // init tell2
 							buf.seek(gsub.featureVariationsOffset + featureTableSubstitutionOffset + alternateFeatureOffset);
 							buf.seekr(2); // featureParams, always 0
-							substitution.lookups = decodeLookupIndices();
+							substitution.lookups = buf.decodeLookupIndices();
 							featureVariation.substitutions.push(substitution);
 							buf.seek(tell2); // return to tell2
 						}
@@ -5196,10 +5205,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 				featureVariations.push(featureVariation);
 			}
 		}
-	}
-
-	function decodeLookupIndices() {
-		return buf.u16array(buf.u16);
 	}
 
 	function decodeLookup(lookupListIndex) {
@@ -5392,9 +5397,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		const feature = gsub.features[index];
 		const groupId = featureGroups[feature.tag]; //  if groupId is 0, 1 or 2 it’s valid; if groupId is undefined, it’s invalid
 		if (groupId !== undefined) {
-			buf.seek(gsub.featureListOffset + feature.offset);
-			feature.featureParamsOffset = buf.u16;
-			const lookupListIndices = altLookupsForFeatureIndex[index] || decodeLookupIndices(); // use the featureVariations lookups if they’re available, otherwise decode them inline
+			const lookupListIndices = altLookupsForFeatureIndex[index] || feature.lookupIndices; // use the featureVariations lookups if they’re available, otherwise use the default feature.lookupIndices
 			lookupListIndices.forEach(lookupIndex => {
 				lookupGroups[groupId].push(lookupIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
 			})
