@@ -5066,7 +5066,7 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 // - inputRun is an array of glyph ids
 // - options.userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
 // - options.script is a 4-character string, e.g. "latn", "cyrl", "DFLT" (can be undefined)
-// - options.language is a 4-character string, e.g. "AZE ", "MOL ", "TRK " (but often undefined)
+// - options.language is a 4-character string, e.g. "AZE ", "MOL ", "TRK " (can be undefined, will be ignored if script is undefined)
 // - options.tuple is the normalized variations tuple
 // - return value is the output run (an array of glyph ids)
 // Docs:
@@ -5083,16 +5083,26 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		USE_MARK_FILTERING_SET    = 0x0010,
 		MARK_ATTACHMENT_TYPE_MASK = 0xFF00;
 
+	// general setup
+	const gsub = this.GSUB;
+	if (!gsub) return inputRun; // no GSUB table, so no transformation
+	const buf = gsub.buffer;
+	let run = [...inputRun]; // initialize the run array, which will mutate to become the output run that we return from the function
+
 	// which script and language are active?
-	const script = options.script && this.GSUB.scripts[options.script] ? this.GSUB.scripts[options.script] : this.GSUB.scripts["DFLT"];
+	const script = options.script && gsub.scripts[options.script] ? gsub.scripts[options.script] : gsub.scripts["DFLT"];
 	const langSys = options.language && script[options.language] ? script[options.language] : script["dflt"];
 	const requestedFeatures = options.userFeatures || {}; // object with keys as feature tags for keys, true/false for values
 	const lookupGroups = [[], [], []]; // we have initial group, normal group, and custom group
 
-	// features are defined by the spec to by on by default: the integer denotes which group they are in (0=initial, 1=normal, 2=custom)
+	// features are defined by the spec to be on by default: the integer denotes which group they are in (0=initial, 1=normal, 2=custom)
 	const featureGroups = {
-		rvrn: 0, // process in initial group of lookups
-		ccmp: 0, // process in initial group of lookups
+
+		// initial lookup group
+		rvrn: 0,
+		ccmp: 0,
+		
+		// normal lookup group
 		abvm: 1,
 		blwm: 1,
 		locl: 1,
@@ -5126,12 +5136,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 			options.tuple = Array(this.fvar.axisCount).fill(0);
 		}
 	}
-
-	// general setup
-	const gsub = this.GSUB;
-	if (!gsub) return inputRun; // no GSUB table, so no transformation
-	const buf = gsub.buffer;
-	let run = [...inputRun]; // initialize the run array, which will mutate to become the output run that we return from the function
 
 	// lookups setup (this becomes a sparse array)
 	const lookups = [];
