@@ -943,6 +943,9 @@ const TABLE_DECODERS = {
 				gpos.featureVariationsOffset = buf.u32;
 			}
 		}
+
+		buf.seek(gpos.scriptListOffset);
+		gpos.scripts = buf.decodeScriptList();
 	},
 
 	"GDEF": (font, buf) => {
@@ -3306,6 +3309,8 @@ class SamsaBuffer extends DataView {
 		return options.Uint8Array ? finalBufferU8 : finalBuffer;
 	}
 
+	// decode a scriptList
+	// - every GPOS and GSUB table references a scriptList
 	decodeScriptList() {
 
 		const decodeLangSys = langSysOffset => {
@@ -3325,24 +3330,21 @@ class SamsaBuffer extends DataView {
 		};
 
 		const scriptListOffset = this.tell();
-		const scripts = {}; // we’ll index by script tag
+		const scripts = {}; // we index by script tag, e.g. "latn", "DFLT"
 		const scriptCount = this.u16;
 		for (let s=0; s<scriptCount; s++) {
 			const scriptTag = this.tag, scriptOffset = this.u16;
 			const tell = this.tell();
 			this.seek(scriptListOffset + scriptOffset);
 			const defaultLangSysOffset = this.u16;
-			const script = {
-				defaultLangSys: defaultLangSysOffset ? decodeLangSys(defaultLangSysOffset) : null,
-				langSysRecords: [],
+			scripts[scriptTag] = {
+				dflt: defaultLangSysOffset ? decodeLangSys(scriptOffset + defaultLangSysOffset) : null, // we index by language tag, e.g. "dflt", "TRK ", "MOL "
 			};
 			const langSysCount = this.u16;
 			for (let l=0; l<langSysCount; l++) {
-				const tag = this.tag, langSysOffset = this.u16;
-				const langSys = decodeLangSys(scriptOffset + langSysOffset);
-				script.langSysRecords[tag] = langSys;
+				const langTag = this.tag, langSysOffset = this.u16;
+				scripts[scriptTag][langTag] = decodeLangSys(scriptOffset + langSysOffset);
 			}
-			scripts[scriptTag] = script;
 			this.seek(tell);
 		}
 
@@ -3427,19 +3429,12 @@ function SamsaFont(buf, options = {}) {
 		// options.allTVTs: load all TVTs?
 		if (options.allTVTs && this.gvar) {
 			const gvar = this.gvar;
-			const gvarBuf = this.bufferFromTable("gvar");
 			for (let g=0; g<this.maxp.numGlyphs; g++) {
 
 				if (!this.glyphs[g].font)
-					console.log(this.glyphs[g])
+					console.log(this.glyphs[g]);
 
-				if (gvar.tupleOffsets[g+1] > gvar.tupleOffsets[g]) { // do we have TVT data?
-					gvarBuf.seek(gvar.glyphVariationDataArrayOffset + gvar.tupleOffsets[g]);
-					this.glyphs[g].tvts = gvarBuf.decodeTvts(this.glyphs[g]);
-				}
-				else {
-					this.glyphs[g].tvts = [];
-				}
+				this.glyphs[g].tvts = gvar.buffer.decodeTvts(this.glyphs[g]); // returns tvts array if we have it, otherwise []
 			}
 		}
 	}
@@ -3683,7 +3678,6 @@ SamsaFont.prototype.tupleFromFvs = function (fvs) {
 // - userTuple is an initial tuple, *before* processing by avar
 function SamsaInstance(font, userTuple=[], options={}) {
 
-	//console.log("In SamsaInstance creating with ", userTuple);
 	this.font = font;
 	const {avar, gvar} = font; // destructure table data objects
 	this.userTuple = [...userTuple]; // the original tuple untransformed by avar
@@ -3871,7 +3865,7 @@ function SamsaGlyph (init={}) {
 	this.points = init.points || [];
 	this.components = init.components || [];
 	this.endPts = init.endPts || [];
-	this.tvts = init.tvts || []; // undefined means not parsed; empty array means no tvts
+	this.tvts = init.tvts ? font.gvar.buffer.decodeTvts(this) : undefined; // init.tvts is boolean
 	this.curveOrder = 2; 
 	//this.curveOrder = init.curveOrder || (this.font ? this.font.curveOrder : undefined);
 }
@@ -3910,7 +3904,7 @@ SamsaGlyph.prototype.instantiate = function(arg, options={}) {
 	iglyph.instructionLength = this.instructionLength;
 	iglyph.components = this.components;
 	iglyph.endPts = this.endPts;
-	iglyph.tvts = this.tvts;
+	iglyph.tvts = this.tvts ? this.tvts : this.tvts = font.gvar ? font.gvar.buffer.decodeTvts(this) : []; // an empty array means we have found no TVTS; undefined means we have not yet looked
 	iglyph.curveOrder = this.curveOrder;
 	iglyph.touched = []; // helpful for visualising variations
 	iglyph.viz = {tvts: []}; // visualization data
@@ -4054,7 +4048,6 @@ SamsaGlyph.prototype.instantiate = function(arg, options={}) {
 				scaledDeltas: scaledDeltas,
 			});
 		}
-
 	}); // end of processing the tvts
 
 	// recalculate bbox
@@ -5007,7 +5000,7 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 	}
 
 	// process the glyph run in GSUB
-	glyphRun = font.glyphRunGSUB(glyphRun, userFeatures, this.tuple);
+	glyphRun = font.glyphRunGSUB(glyphRun, { userFeatures: userFeatures, tuple: this.tuple }); // to specify script and language, use properties on options, e.g. script: "latn", language: "TRK "
 
 	// get advance info for each glyph
 	let x = 0, y = 0;
@@ -5020,7 +5013,7 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 
 	// process the glyph run in GPOS
 	// - TODO
-	// const glyphShifts = font.glyphRunGPOS(glyphRun, userFeatures, this.tuple);
+	// const glyphShifts = font.glyphRunGPOS(glyphRun, options);
 	// glyphLayout.forEach((glyphPlacement, i) => {
 	// 	glyphPlacement.x += glyphShifts[i][0];
 	// 	glyphPlacement.y += glyphShifts[i][1];
@@ -5034,13 +5027,16 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 // SamsaFont.glyphRunGSUB()
 // - process a glyph run with GSUB
 // - inputRun is an array of glyph ids
-// - userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
+// - options.userFeatures is an object of user features with feature tags as keys and boolean as value, e.g. { "ss01": true, "liga": false }
+// - options.script is a 4-character string, e.g. "latn", "cyrl", "DFLT" (can be undefined)
+// - options.language is a 4-character string, e.g. "AZE ", "MOL ", "TRK " (but often undefined)
+// - options.tuple is the normalized variations tuple
 // - return value is the output run (an array of glyph ids)
 // Docs:
 // - GSUB spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
 // - OpenType Layout Common Table Formats: https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
 // - Excellent discussion on feature/lookup processing order: https://typedrawers.com/discussion/3436/order-of-execution-of-opentype-features
-SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
+SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 
 	const
 		RIGHT_TO_LEFT             = 0x0001,
@@ -5050,50 +5046,70 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 		USE_MARK_FILTERING_SET    = 0x0010,
 		MARK_ATTACHMENT_TYPE_MASK = 0xFF00;
 
-	const defaultFeatures = {
-		rvrn: true, // process early
-		abvm: true,
-		blwm: true,
-		ccmp: true,
-		locl: true,
-		mark: true,
-		mkmk: true,
-		rlig: true,
-		calt: true,
-		clig: true,
-		curs: true,
-		dist: true,
-		kern: true,
-		liga: true,
-		rclt: true, // process late
-		// user features may be inserted here if undefined, above if overriding default
-	}
-	userFeatures = Object.assign(defaultFeatures, userFeatures);
+	// which script and language are active?
+	const script = options.script && this.GSUB.scripts[options.script] ? this.GSUB.scripts[options.script] : this.GSUB.scripts["DFLT"];
+	const langSys = options.language && script[options.language] ? script[options.language] : script["dflt"];
+	const requestedFeatures = options.userFeatures || {}; // object with keys as feature tags for keys, true/false for values
+	const lookupGroups = [[], [], []]; // we have initial group, normal group, and custom group
+
+	// features are defined by the spec to by on by default: the integer denotes which group they are in (0=initial, 1=normal, 2=custom)
+	const featureGroups = {
+		rvrn: 0, // process in initial group of lookups
+		ccmp: 0, // process in initial group of lookups
+		abvm: 1,
+		blwm: 1,
+		locl: 1,
+		mark: 1,
+		mkmk: 1,
+		rlig: 1,
+		calt: 1,
+		clig: 1,
+		curs: 1,
+		dist: 1,
+		kern: 1,
+		liga: 1,
+		rclt: 1,
+	};
+
+	// add any requested features that are not in the default feature groups to final group, and remove any that are explicitly turned off
+	Object.keys(requestedFeatures).forEach(tag => {
+		// activate a user-requested feature
+		if (requestedFeatures[tag] && featureGroups[tag] === undefined) {
+			featureGroups[tag] = 2; // if it’s not already in the list, add it to group 2 (which happen last)
+		}
+		// disable a system-requested feature
+		else if (requestedFeatures[tag] === false && featureGroups[tag] !== undefined) {
+			featureGroups[tag] = undefined;
+		}
+	});
 
 	// tuple must be an array of Numbers, so fix if badly formed
 	if (this.fvar) {
-		if (tuple === undefined || !Array.isArray(tuple) || tuple.length !== this.fvar.axisCount || tuple.some(v => typeof v !== "number")) {
-			tuple = Array(this.fvar.axisCount).fill(0);
+		if (options.tuple === undefined || !Array.isArray(options.tuple) || options.tuple.length !== this.fvar.axisCount || options.tuple.some(v => typeof v !== "number")) {
+			options.tuple = Array(this.fvar.axisCount).fill(0);
 		}
 	}
 
 	// general setup
 	const gsub = this.GSUB;
-	if (!gsub) return inputRun; // no GSUB table
+	if (!gsub) return inputRun; // no GSUB table, so no transformation
 	const buf = gsub.buffer;
 	let run = [...inputRun]; // initialize the run array, which will mutate to become the output run that we return from the function
 
 	// lookups setup
 	const lookups = [];
+	const lookupsToExecute = [];
+	
 	buf.seek(gsub.lookupListOffset);
 	const lookupCount = buf.u16;
 
-	// get a structure of features in this font
-	const features = [];
+	// get a structure of all features in this font
+	const fontFeatures = [];
 	buf.seek(gsub.featureListOffset);
 	const featureCount = buf.u16;
 	for (let f=0; f<featureCount; f++) {
-		features.push({
+		fontFeatures.push({
+			index: f,
 			tag: buf.tag,
 			offset: buf.u16,
 			featureParams: {},
@@ -5140,19 +5156,15 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 					const version = [buf.u16, buf.u16];
 					if (version[0] === 1 && version[1] === 0) {
 						const count = buf.u16;
-						let tell2 = buf.tell(); // init tell2
 						for (let fts=0; fts<count; fts++) {
-							buf.seek(tell2); // return to tell2
 							const substitution = { featureIndex: buf.u16, lookups: [] };
 							const alternateFeatureOffset = buf.u32;
-							tell2 = buf.tell(); // store current pos as tell2 so we can return to it next time around the loop
+							const tell2 = buf.tell(); // init tell2
 							buf.seek(gsub.featureVariationsOffset + featureTableSubstitutionOffset + alternateFeatureOffset);
 							buf.seekr(2); // featureParams, always 0
-							const lookupCount = buf.u16;
-							for (let lu=0; lu<lookupCount; lu++) {
-								substitution.lookups.push(buf.u16);
-							}
+							substitution.lookups = decodeLookupIndices();
 							featureVariation.substitutions.push(substitution);
+							buf.seek(tell2); // return to tell2
 						}
 					}	
 				}
@@ -5163,213 +5175,221 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 		}
 	}
 
-	// go thru each feature, creating lookups and assining lookup ids to each feature
-	features.forEach(feature => {
-		buf.seek(gsub.featureListOffset + feature.offset);
-		feature.featureParamsOffset = buf.u16;
-		const lookupIndexCount = buf.u16;
-		for (let i=0; i<lookupIndexCount; i++) {
-			feature.lookupListIndices.push(buf.u16);
+	function decodeLookupIndices() {
+		const lookupIndices = [];
+		const count = buf.u16;
+		for (let i=0; i<count; i++) {
+			lookupIndices.push(buf.u16);
 		}
-		feature.lookupListIndices.forEach(lookupListIndex => {
-			if (lookupListIndex < lookupCount) {
-				if (!lookups[lookupListIndex]) {
-					buf.seek(gsub.lookupListOffset + 2 + 2 * lookupListIndex);
-					const lookupOffset = buf.u16;
-					buf.seek(gsub.lookupListOffset + lookupOffset);
+		return lookupIndices;
+	}
 
-					const lookup = {
-						type: buf.u16,
-						flag: buf.u16,
-						subtableOffsets: [],
-						subtables: [],
-					}
-					const subTableCount = buf.u16;
-					for (let t=0; t<subTableCount; t++) {
-						lookup.subtableOffsets.push(buf.u16);
-					}
+	function decodeLookup(lookupListIndex) {
 
-					lookup.subtableOffsets.forEach(sto => {
-						const subtableOffset = gsub.lookupListOffset + lookupOffset + sto;
-						buf.seek(subtableOffset);
-						const subtable = {
-							format: buf.u16,
-						}
-						if (lookup.type <= 4) {
+		buf.seek(gsub.lookupListOffset + 2 + 2 * lookupListIndex);
+		const lookupOffset = buf.u16;
+		buf.seek(gsub.lookupListOffset + lookupOffset);
 
-							const coverageOffset = buf.u16;
-							switch (lookup.type) {
+		const lookup = {
+			type: buf.u16,
+			flag: buf.u16,
+			subtableOffsets: [],
+			subtables: [],
+		}
+		const subTableCount = buf.u16;
+		for (let t=0; t<subTableCount; t++) {
+			lookup.subtableOffsets.push(buf.u16);
+		}
 
-								// LookupType 1: Single Substitution Subtable
-								case 1: {
-									switch (subtable.format) {
-										case 1: {
-											subtable.deltaGlyphID = buf.i16; // note i16
-											break;
-										}
-
-										case 2: {
-											const glyphCount = buf.u16;
-											subtable.substituteGlyphIDs = [];
-											for (let g=0; g<glyphCount; g++) {
-												subtable.substituteGlyphIDs.push(buf.u16);
-											}
-											break;
-										}
-									}
-									break;
-								}
-
-								// LookupType 2: Multiple Substitution Subtable
-								case 2: {
-									if (subtable.format == 1) {
-										const sequenceCount = buf.u16;
-										const sequenceOffsets = [];
-										subtable.sequences = [];
-										for (let s=0; s<sequenceCount; s++) {
-											sequenceOffsets.push(buf.u16);
-										}
-										sequenceOffsets.forEach(offset => {
-											buf.seek(subtableOffset + offset);
-											const sequence = [];
-											const glyphCount = buf.u16;
-											for (let g=0; g<glyphCount; g++) {
-												sequence.push(buf.u16);
-											}
-											subtable.sequences.push(sequence);
-										});
-										break;
-									}
-									break;
-								}
-
-								// LookupType 3: Alternate Substitution Subtable
-								case 3: {
-									if (subtable.format == 1) {
-										const alternateSetCount = buf.u16;
-										const alternateSetOffsets = [];
-										subtable.alternateGlyphIDs = [];
-										for (let a=0; a<alternateSetCount; a++) {
-											alternateSetOffsets.push(buf.u16);
-										}
-										alternateSetOffsets.forEach(offset => {
-											buf.seek(subtableOffset + offset);
-											const glyphCount = buf.u16;
-											for (let g=0; g<glyphCount; g++) {
-												subtable.alternateGlyphIDs.push(buf.u16);
-											}
-										});
-									}
-									break;
-								}
-
-								// LookupType 4: Ligature Substitution Subtable
-								case 4: {
-									if (subtable.format == 1) {
-										const ligSetCount = buf.u16; // a ligature set is a set of ligatures that share the same first glyph (e.g. ffl, ff, fi, fl)
-										const ligSetOffsets = [];
-										subtable.ligatureSets = []; // there is one ligatureSet per covered glyph, so later we can use coverageIndex to find the correct ligatureSet
-										for (let ls=0; ls<ligSetCount; ls++) {
-											ligSetOffsets.push(buf.u16);
-										}
-										ligSetOffsets.forEach(offset => {
-											buf.seek(subtableOffset + offset);
-											const ligSet = [];
-											const ligCount = buf.u16;
-											const ligOffsets = [];
-											for (let li=0; li<ligCount; li++) {
-												ligOffsets.push(buf.u16);
-											}
-											ligOffsets.forEach(offset2 => {
-												buf.seek(subtableOffset + offset + offset2);
-												const lig = {
-													ligatureGlyph: buf.u16,
-													componentGlyphIDs: [],
-												};
-												const componentCount = buf.u16 - 1; // note -1, since componentCount includes the initial glyph
-												for (let g=0; g<componentCount; g++) {
-													lig.componentGlyphIDs.push(buf.u16);
-												}
-												ligSet.push(lig);
-											});
-											subtable.ligatureSets.push(ligSet);
-										});
-									}
-									break;
-								}
-							}
-
-							// get coverage for this lookup
-							buf.seek(subtableOffset + coverageOffset);
-							const coverageFormat = buf.u16;
-							subtable.coverage = { format: coverageFormat };
-							switch (coverageFormat) {
-								case 1: {
-									const glyphCount = buf.u16;
-									subtable.coverage.glyphArray = [];
-									for (let g=0; g<glyphCount; g++) {
-										subtable.coverage.glyphArray.push(buf.u16);
-									}
-									break;
-								}
-								case 2: {
-									const rangeCount = buf.u16;
-									subtable.coverage.glyphRanges = [];
-									for (let r=0; r<rangeCount; r++) {
-										subtable.coverage.glyphRanges.push({
-											startGlyphID: buf.u16,
-											endGlyphID: buf.u16,
-											startCoverageIndex: buf.u16,
-										});
-									}
-									break;
-								}
-							}
-						}
-						lookup.subtables.push(subtable);
-					})
-
-					if (lookup.flag & USE_MARK_FILTERING_SET) lookup.markFilteringSet = buf.u16;
-					lookups[lookupListIndex] = lookup;
-				}
-				feature.lookups.push(lookups[lookupListIndex]);
+		lookup.subtableOffsets.forEach(sto => {
+			const subtableOffset = gsub.lookupListOffset + lookupOffset + sto;
+			buf.seek(subtableOffset);
+			const subtable = {
+				format: buf.u16,
 			}
+			if (lookup.type <= 4) {
+
+				const coverageOffset = buf.u16;
+				switch (lookup.type) {
+
+					// LookupType 1: Single Substitution Subtable
+					case 1: {
+						switch (subtable.format) {
+							case 1: {
+								subtable.deltaGlyphID = buf.i16; // note i16
+								break;
+							}
+
+							case 2: {
+								const glyphCount = buf.u16;
+								subtable.substituteGlyphIDs = [];
+								for (let g=0; g<glyphCount; g++) {
+									subtable.substituteGlyphIDs.push(buf.u16);
+								}
+								break;
+							}
+						}
+						break;
+					}
+
+					// LookupType 2: Multiple Substitution Subtable
+					case 2: {
+						if (subtable.format == 1) {
+							const sequenceCount = buf.u16;
+							const sequenceOffsets = [];
+							subtable.sequences = [];
+							for (let s=0; s<sequenceCount; s++) {
+								sequenceOffsets.push(buf.u16);
+							}
+							sequenceOffsets.forEach(offset => {
+								buf.seek(subtableOffset + offset);
+								const sequence = [];
+								const glyphCount = buf.u16;
+								for (let g=0; g<glyphCount; g++) {
+									sequence.push(buf.u16);
+								}
+								subtable.sequences.push(sequence);
+							});
+							break;
+						}
+						break;
+					}
+
+					// LookupType 3: Alternate Substitution Subtable
+					case 3: {
+						if (subtable.format == 1) {
+							const alternateSetCount = buf.u16;
+							const alternateSetOffsets = [];
+							subtable.alternateGlyphIDs = [];
+							for (let a=0; a<alternateSetCount; a++) {
+								alternateSetOffsets.push(buf.u16);
+							}
+							alternateSetOffsets.forEach(offset => {
+								buf.seek(subtableOffset + offset);
+								const glyphCount = buf.u16;
+								for (let g=0; g<glyphCount; g++) {
+									subtable.alternateGlyphIDs.push(buf.u16);
+								}
+							});
+						}
+						break;
+					}
+
+					// LookupType 4: Ligature Substitution Subtable
+					case 4: {
+						if (subtable.format == 1) {
+							const ligSetCount = buf.u16; // a ligature set is a set of ligatures that share the same first glyph (e.g. ffl, ff, fi, fl)
+							const ligSetOffsets = [];
+							subtable.ligatureSets = []; // there is one ligatureSet per covered glyph, so later we can use coverageIndex to find the correct ligatureSet
+							for (let ls=0; ls<ligSetCount; ls++) {
+								ligSetOffsets.push(buf.u16);
+							}
+							ligSetOffsets.forEach(offset => {
+								buf.seek(subtableOffset + offset);
+								const ligSet = [];
+								const ligCount = buf.u16;
+								const ligOffsets = [];
+								for (let li=0; li<ligCount; li++) {
+									ligOffsets.push(buf.u16);
+								}
+								ligOffsets.forEach(offset2 => {
+									buf.seek(subtableOffset + offset + offset2);
+									const lig = {
+										ligatureGlyph: buf.u16,
+										componentGlyphIDs: [],
+									};
+									const componentCount = buf.u16 - 1; // note -1, since componentCount includes the initial glyph
+									for (let g=0; g<componentCount; g++) {
+										lig.componentGlyphIDs.push(buf.u16);
+									}
+									ligSet.push(lig);
+								});
+								subtable.ligatureSets.push(ligSet);
+							});
+						}
+						break;
+					}
+				}
+
+				// get coverage for this lookup
+				buf.seek(subtableOffset + coverageOffset);
+				const coverageFormat = buf.u16;
+				subtable.coverage = { format: coverageFormat };
+				switch (coverageFormat) {
+					case 1: {
+						const glyphCount = buf.u16;
+						subtable.coverage.glyphArray = [];
+						for (let g=0; g<glyphCount; g++) {
+							subtable.coverage.glyphArray.push(buf.u16);
+						}
+						break;
+					}
+					case 2: {
+						const rangeCount = buf.u16;
+						subtable.coverage.glyphRanges = [];
+						for (let r=0; r<rangeCount; r++) {
+							subtable.coverage.glyphRanges.push({
+								startGlyphID: buf.u16,
+								endGlyphID: buf.u16,
+								startCoverageIndex: buf.u16,
+							});
+						}
+						break;
+					}
+				}
+			}
+			lookup.subtables.push(subtable);
 		})
-	});
+		if (lookup.flag & USE_MARK_FILTERING_SET)
+			lookup.markFilteringSet = buf.u16;
+		
+		return lookup;
+	}
 
 	// now we are live
 
-	// get lookups required for featureVariations
-	// - at some point we need to handle rclt as "late" and rvrn as "early"
-	const feaVarLookups = [];
+	// get lookups required for featureVariations: altLookupsForFeatureIndex
+	const altLookupsForFeatureIndex = []; // sparse array
 	featureVariations.forEach(featureVariation => {
-
 		let conditionsMet = true; // this also handles the case with no conditions
 		for (let c=0; c < featureVariation.conditions.length; c++) {
 			const condition = featureVariation.conditions[c];
-			if (tuple[condition.axisIndex] < condition.min || tuple[condition.axisIndex] > condition.max) {
+			if (options.tuple[condition.axisIndex] < condition.min || options.tuple[condition.axisIndex] > condition.max) {
 				conditionsMet = false;
 				break;
 			}
 		}
-
-		// we are checking the conditions first, then the features
-		// but it might be more efficient to check the features first, then the conditions...
 		if (conditionsMet) {
 			featureVariation.substitutions.forEach(substitution => {
-				const feature = features[substitution.featureIndex];
-				if (userFeatures[feature.tag]) { // e.g. is "rvrn" in the list of active features?
-					feaVarLookups.push(...substitution.lookups);
-				}
+				altLookupsForFeatureIndex[substitution.featureIndex] = substitution.lookups;
 			});
 		}
 	});
 
-	// basically we will prepend (rvrn) or append (rclt) some lookups to the set of lookups below
-	// we decide which lookups to add based on the conditions
+	// go thru each feature that this this langSys implements, checking if it is in a valid group
+	langSys.featureIndices.forEach(index => {
+		const feature = fontFeatures[index];
+		const groupId = featureGroups[feature.tag]; //  if groupId is 0, 1 or 2 it’s valid; if groupId is undefined, it’s invalid
+		if (groupId !== undefined) {
+			buf.seek(gsub.featureListOffset + feature.offset);
+			feature.featureParamsOffset = buf.u16;
+			const lookupListIndices = altLookupsForFeatureIndex[index] || decodeLookupIndices(); // use the featureVariations lookups if they’re available, otherwise decode them inline
+			lookupListIndices.forEach(lookupListIndex => {
+				if (lookupListIndex < lookupCount) {
+					if (!lookups[lookupListIndex]) {
+						lookups[lookupListIndex] = decodeLookup(lookupListIndex);
+					}
+					feature.lookups.push(lookups[lookupListIndex]);
+					lookupGroups[groupId].push(lookupListIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
+				}
+			})
+		}
+	});
 
-
-
+	// convert to a single list of lookup ids, 
+	const lookupsToUse = lookupGroups[0].sort((a,b) => a-b)
+						.concat(lookupGroups[1].sort((a,b) => a-b))
+						.concat(lookupGroups[2].sort((a,b) => a-b));
 
 	// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
 	// During text processing, a client applies a feature to some sequence of glyphs for a string. It then processes 
@@ -5378,22 +5398,11 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 	// for each glyph in the sequence, it then processes the next lookup referenced by the feature in the same manner. 
 	// This continues until all lookups referenced by the feature have been processed.
 
-	// prepare the lookupListIndices to use
-	let lookupListIndicesToUse = [];
-
-	// TODO: fix the order of execution of features
-	features.forEach(feature => {
-		//if (featureTags.includes(feature.tag))
-		if (userFeatures[feature.tag])
-			lookupListIndicesToUse.push(...feature.lookupListIndices);
-	});
-	lookupListIndicesToUse = [...new Set(lookupListIndicesToUse)].sort((a,b) => a-b); // make unique and sort // TODO: hmmmm this sort()
-
 	// for each lookupList...
-	lookupListIndicesToUse.forEach(lookupListIndex => {
+	lookupsToUse.forEach(lookupIndex => {
 
 		// now apply the lookups in this lookup list
-		const lookup = lookups[lookupListIndex];
+		const lookup = lookups[lookupIndex];
 
 		// go thru the glyphs in the glyph run for this lookupList
 		const glyphsNotCovered = {}; // TODO: keep track of glyphs that are not handled by any lookups, so we can avoid testing for them more than once; maybe have it as glyphLookups arrays (e.g. { glyph123: [ lookup1, lookup7, lookup33 ], glyph8: null } ) so each glyph can lookup which lookups it’s handled by (if any), so no need to search thru all lookups
@@ -5422,6 +5431,9 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, userFeatures, tuple) {
 								break;
 							}
 						}
+					}
+					else {
+						continue;
 					}
 
 					// if g was found, we’ll now have a coverageIndex
