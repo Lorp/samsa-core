@@ -926,8 +926,27 @@ const TABLE_DECODERS = {
 			}
 		}
 
+		// get script list
 		buf.seek(gsub.scriptListOffset);
 		gsub.scripts = buf.decodeScriptList();
+
+		// get initial structure of all features in the font
+		buf.seek(gsub.featureListOffset);
+		gsub.features = [];
+		const featureCount = buf.u16;
+		for (let f=0; f<featureCount; f++) {
+			gsub.features.push({
+				tag: buf.tag,
+				offset: buf.u16,
+				featureParams: {},
+				lookupListIndices: [],
+				lookups: [],
+			});
+		}
+
+		// get lookup count
+		buf.seek(gsub.lookupListOffset);
+		gsub.lookupCount = buf.u16;
 	},
 
 	"GPOS": (font, buf) => {
@@ -5114,27 +5133,9 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	const buf = gsub.buffer;
 	let run = [...inputRun]; // initialize the run array, which will mutate to become the output run that we return from the function
 
-	// lookups setup
+	// lookups setup (this becomes a sparse array)
 	const lookups = [];
-	const lookupsToExecute = [];
 	
-	buf.seek(gsub.lookupListOffset);
-	const lookupCount = buf.u16;
-
-	// get a structure of all features in this font
-	const fontFeatures = [];
-	buf.seek(gsub.featureListOffset);
-	const featureCount = buf.u16;
-	for (let f=0; f<featureCount; f++) {
-		fontFeatures.push({
-			index: f,
-			tag: buf.tag,
-			offset: buf.u16,
-			featureParams: {},
-			lookupListIndices: [],
-			lookups: [],
-		}); // we could use a sparse array if we know a feature is not used
-	}
 
 	// get Feature Variations
 	const featureVariations = [];
@@ -5198,6 +5199,9 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	}
 
 	function decodeLookup(lookupListIndex) {
+
+		if (lookupListIndex >= gsub.lookupCount)
+			return false;
 
 		buf.seek(gsub.lookupListOffset + 2 + 2 * lookupListIndex);
 		const lookupOffset = buf.u16;
@@ -5381,20 +5385,14 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 
 	// go thru each feature that this this langSys implements, checking if it is in a valid group
 	langSys.featureIndices.forEach(index => {
-		const feature = fontFeatures[index];
+		const feature = gsub.features[index];
 		const groupId = featureGroups[feature.tag]; //  if groupId is 0, 1 or 2 it’s valid; if groupId is undefined, it’s invalid
 		if (groupId !== undefined) {
 			buf.seek(gsub.featureListOffset + feature.offset);
 			feature.featureParamsOffset = buf.u16;
 			const lookupListIndices = altLookupsForFeatureIndex[index] || decodeLookupIndices(); // use the featureVariations lookups if they’re available, otherwise decode them inline
-			lookupListIndices.forEach(lookupListIndex => {
-				if (lookupListIndex < lookupCount) {
-					if (!lookups[lookupListIndex]) {
-						lookups[lookupListIndex] = decodeLookup(lookupListIndex);
-					}
-					feature.lookups.push(lookups[lookupListIndex]);
-					lookupGroups[groupId].push(lookupListIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
-				}
+			lookupListIndices.forEach(lookupIndex => {
+				lookupGroups[groupId].push(lookupIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
 			})
 		}
 	});
@@ -5413,8 +5411,8 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	// for each lookupList... (we flatten the lookup groups into a single array of integers)
 	lookupGroups.flat().forEach(lookupIndex => {
 
-		// now apply the lookups in this lookup list
-		const lookup = lookups[lookupIndex];
+		// now apply the lookups in this lookup list (decode and cache the lookup if we don’t have it)
+		const lookup = lookups[lookupIndex] || (lookups[lookupIndex] = decodeLookup(lookupIndex));
 
 		// go thru the glyphs in the glyph run for this lookupList
 		const glyphsNotCovered = {}; // TODO: keep track of glyphs that are not handled by any lookups, so we can avoid testing for them more than once; maybe have it as glyphLookups arrays (e.g. { glyph123: [ lookup1, lookup7, lookup33 ], glyph8: null } ) so each glyph can lookup which lookups it’s handled by (if any), so no need to search thru all lookups
