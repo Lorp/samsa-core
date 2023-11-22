@@ -935,16 +935,11 @@ const TABLE_DECODERS = {
 		gsub.features = [];
 		const featureCount = buf.u16;
 		for (let f=0; f<featureCount; f++) {
-			const feature = {
-				tag: buf.tag,
-				offset: buf.u16,
-				featureParams: {},
-				lookupListIndices: [],
-				lookups: [],
-			};
+			const feature = { tag: buf.tag };
+			const offset = buf.u16;
 			const tell = buf.tell();
-			buf.seek(gsub.featureListOffset + feature.offset);
-			feature.featureParamsOffset = buf.u16;
+			buf.seek(gsub.featureListOffset + offset);
+			buf.seekr(2); // ignore featureParamsOffset
 			feature.lookupIndices = buf.decodeLookupIndices();
 			gsub.features.push(feature);
 			buf.seek(tell);
@@ -5397,8 +5392,8 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		const feature = gsub.features[index];
 		const groupId = featureGroups[feature.tag]; //  if groupId is 0, 1 or 2 it’s valid; if groupId is undefined, it’s invalid
 		if (groupId !== undefined) {
-			const lookupListIndices = altLookupsForFeatureIndex[index] || feature.lookupIndices; // use the featureVariations lookups if they’re available, otherwise use the default feature.lookupIndices
-			lookupListIndices.forEach(lookupIndex => {
+			const lookupIndices = altLookupsForFeatureIndex[index] || feature.lookupIndices; // use the featureVariations lookups if they’re available, otherwise use the default feature.lookupIndices
+			lookupIndices.forEach(lookupIndex => {
 				lookupGroups[groupId].push(lookupIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
 			})
 		}
