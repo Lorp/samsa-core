@@ -1522,6 +1522,24 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
+	u16array(count) {
+		const arr = [];
+		while (count--) {
+			arr.push(this.getUint16(this.p));
+			this.p+=2;
+		}
+		return arr;
+	}
+
+	i16array(count) {
+		const arr = [];
+		while (count--) {
+			arr.push(this.getInt16(this.p));
+			this.p+=2;
+		}
+		return arr;
+	}
+
 	compare(condition) {
 		const [a, comparison, b] = condition;
 		switch (comparison) {
@@ -5176,12 +5194,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	}
 
 	function decodeLookupIndices() {
-		const lookupIndices = [];
-		const count = buf.u16;
-		for (let i=0; i<count; i++) {
-			lookupIndices.push(buf.u16);
-		}
-		return lookupIndices;
+		return buf.u16array(buf.u16);
 	}
 
 	function decodeLookup(lookupListIndex) {
@@ -5390,7 +5403,6 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 	lookupGroups.forEach(lookupGroup => lookupGroup.sort((a,b) => a-b));
 
 	
-
 	// https://learn.microsoft.com/en-us/typography/opentype/spec/chapter2
 	// During text processing, a client applies a feature to some sequence of glyphs for a string. It then processes 
 	// the lookups referenced by that feature in their lookup list order. For each lookup, the client processes that 
