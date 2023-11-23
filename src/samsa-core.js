@@ -5231,16 +5231,11 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 
 					// LookupType 1: Single Substitution Subtable
 					case 1: {
-						switch (subtable.format) {
-							case 1: {
-								subtable.deltaGlyphID = buf.i16; // note i16
-								break;
-							}
-
-							case 2: {
-								subtable.substituteGlyphIDs = buf.u16pascalArray();
-								break;
-							}
+						if (subtable.format == 1) {
+							subtable.deltaGlyphID = buf.i16; // note i16
+						}
+						else if (subtable.format == 2) {
+							subtable.substituteGlyphIDs = buf.u16pascalArray();
 						}
 						break;
 					}
@@ -5283,10 +5278,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 								const ligOffsets = buf.u16pascalArray();
 								ligOffsets.forEach(offset2 => {
 									buf.seek(subtableOffset + offset + offset2);
-									const lig = {
-										ligatureGlyph: buf.u16,
-										componentGlyphIDs: [],
-									};
+									const lig = { ligatureGlyph: buf.u16, componentGlyphIDs: [] };
 									const componentCount = buf.u16 - 1; // note -1, since componentCount includes the initial glyph, so we cannot use SamsaBuffer.u16pascalArray();
 									for (let g=0; g<componentCount; g++) {
 										lig.componentGlyphIDs.push(buf.u16);
