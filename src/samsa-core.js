@@ -1542,7 +1542,34 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
-	// methods for reading an array, which starts with a count u16
+	// methods for reading an array: "Pascal" arrays start with a u16 count
+	u32array(count) {
+		const arr = [];
+		while (count--) {
+			arr.push(this.getUint32(this.p));
+			this.p+=4;
+		}
+		return arr;
+	}
+
+	u16array(count) {
+		const arr = [];
+		while (count--) {
+			arr.push(this.getUint16(this.p));
+			this.p+=2;
+		}
+		return arr;
+	}
+
+	i16array(count) {
+		const arr = [];
+		while (count--) {
+			arr.push(this.getInt16(this.p));
+			this.p+=2;
+		}
+		return arr;
+	}
+
 	u32pascalArray() {
 		const arr = [];
 		let count = this.getUint16(this.p);
@@ -1780,18 +1807,11 @@ class SamsaBuffer extends DataView {
 		}
 
 		// simple glyph
-		else if (glyph.numberOfContours > 0) {
+		else if (glyph.numberOfContours >= 0) { // note that the spec allows for numberOfContours to be 0, in which case we have a zero-contour glyph but with the possibility of instructions to move phantom points
 
-			glyph.endPts = [];
-
-			// end points of each contour
-			for (let c=0; c<glyph.numberOfContours; c++) {
-				glyph.endPts.push(this.u16);
-			}
+			glyph.endPts = this.u16array(glyph.numberOfContours); // end points of each contour
 			glyph.numPoints = glyph.endPts[glyph.numberOfContours -1] + 1;
-
-			// instructions (skip)
-			this.seekr(glyph.instructionLength = this.u16);
+			this.seekr(glyph.instructionLength = this.u16); // skip over instructions
 
 			// flags
 			const flags = [];
@@ -5164,13 +5184,11 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		const version = [buf.u16, buf.u16];
 		if (version[0] === 1 && version[1] === 0) {
 			const featureVariationRecordCount = buf.u32;
-			let tell = buf.tell(); // init tell
 			for (let fvr=0; fvr<featureVariationRecordCount; fvr++) {
-				buf.seek(tell); // return to tell
+				const tell = buf.tell();
 				const featureVariation = { conditions: [], substitutions: [] };
 				const conditionSetOffset = buf.u32;
 				const featureTableSubstitutionOffset = buf.u32;
-				tell = buf.tell(); // store current pos so we can return to it next time around the loop
 
 				// get conditions
 				if (conditionSetOffset) {
@@ -5204,8 +5222,8 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 					}	
 				}
 
-				// store this featureVariation
-				featureVariations.push(featureVariation);
+				featureVariations.push(featureVariation); // store this featureVariation
+				buf.seek(tell); // return to tell
 			}
 		}
 	}
@@ -5278,12 +5296,10 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 								const ligOffsets = buf.u16pascalArray();
 								ligOffsets.forEach(offset2 => {
 									buf.seek(subtableOffset + offset + offset2);
-									const lig = { ligatureGlyph: buf.u16, componentGlyphIDs: [] };
-									const componentCount = buf.u16 - 1; // note -1, since componentCount includes the initial glyph, so we cannot use SamsaBuffer.u16pascalArray();
-									for (let g=0; g<componentCount; g++) {
-										lig.componentGlyphIDs.push(buf.u16);
-									}
-									ligSet.push(lig);
+									ligSet.push({
+										ligatureGlyph: buf.u16,
+										componentGlyphIDs: buf.u16array(buf.u16 - 1), // -1 because componentCount includes the initial glyph
+									 });
 								});
 								subtable.ligatureSets.push(ligSet);
 							});
@@ -5327,7 +5343,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		let conditionsMet = true; // this also handles the case with no conditions
 		for (let c=0; c < featureVariation.conditions.length; c++) {
 			const condition = featureVariation.conditions[c];
-			if (options.tuple[condition.axisIndex] < condition.min || options.tuple[condition.axisIndex] > condition.max) {
+			if (!inRange(options.tuple[condition.axisIndex], condition.min, condition.max)) {
 				conditionsMet = false;
 				break;
 			}
@@ -5344,10 +5360,7 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		const feature = gsub.features[index];
 		const groupId = featureGroups[feature.tag]; //  if groupId is 0, 1 or 2 it’s valid; if groupId is undefined, it’s invalid
 		if (groupId !== undefined) {
-			const lookupIndices = altLookupsForFeatureIndex[index] || feature.lookupIndices; // use the featureVariations lookups if they’re available, otherwise use the default feature.lookupIndices
-			lookupIndices.forEach(lookupIndex => {
-				lookupGroups[groupId].push(lookupIndex); // add it to the relevant lookup group: lookupGroups[0], lookupGroups[1] or lookupGroups[2]
-			})
+			lookupGroups[groupId].push(...(altLookupsForFeatureIndex[index] || feature.lookupIndices)); // for this feature, use featureVariations lookups if they’re active, otherwise use its default lookupIndices
 		}
 	});
 
