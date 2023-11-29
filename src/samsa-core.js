@@ -5473,6 +5473,64 @@ SamsaFont.prototype.glyphRunGSUB = function (inputRun, options={}) {
 }
 
 
+// handy function to render text in a particular format for a given SamsaFont
+SamsaFont.prototype.renderText = function (options={}) {
+
+	// defaults
+	// - these would be nicer with the nullish operator ??= (but somewhere in the build procedure to Figma, mullish operators are not supported)
+	if (options.text === undefined) 
+		options.text = "hello, world!";
+	if (options.fontSize === undefined) 
+		options.fontSize = 12;
+	if (options.format === undefined) 
+		options.format = "svg";
+	
+	// set up instance
+	let instance = options.instance;
+	if (!instance) {
+		if (!options.tuple) { // default to the default instance
+			if (this.fvar)
+				options.tuple = options.fvs ? this.tupleFromFvs(options.fvs) : Array(this.fvar.axisCount).fill(0);
+			else
+				options.tuple = [];
+		}
+		instance = new SamsaInstance(this, options.tuple);
+	}
+
+	const upem = this.head.unitsPerEm;
+	const context = {
+		font: this,
+		instance: instance,
+		color: options.color === undefined ? 0x000000ff : options.color,
+	};
+	const layout = instance.glyphLayoutFromString(options.text); // process the string to get default glyph run, then process that glyph run in GSUB and GPOS, yielding the actual glyphs to position
+
+
+	if (options.format === "svg") {
+
+		let innerSVGComposition = "";
+		context.defs = {};
+
+		layout.forEach(layoutItem => {
+			const glyph = this.glyphs[layoutItem.id];
+			const iglyph = glyph.instantiate(instance);
+			const thisSVG = iglyph.svg(context); // gets the best possible COLR glyph, with monochrome fallback
+			innerSVGComposition += `<g transform="translate(${layoutItem.ax} 0)" fill="${this.hexColorFromU32(context.color)}">` + thisSVG + "</g>";
+		});
+			
+		const svgPreamble = `<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000" viewBox="0 0 2000 2000">`;
+		const svgPostamble = `</svg>`;
+		const scale = options.fontSize/upem;
+		const gPreamble = `<g transform="scale(${scale} ${-scale}) translate(0 ${-upem})">`;
+		const gPostamble = `</g>`;
+		const defs = Object.values(context.defs).join("");
+		
+		return svgPreamble + (defs ? `<defs>${defs}</defs>` : "") + gPreamble + innerSVGComposition + gPostamble + svgPostamble;
+
+	}
+}
+
+
 
 // custom processors
 /*
