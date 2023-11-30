@@ -5502,6 +5502,7 @@ SamsaFont.prototype.renderText = function (options={}) {
 		font: this,
 		instance: instance,
 		color: options.color === undefined ? 0x000000ff : options.color,
+		paletteId: options.paletteId === undefined ? 0 : options.paletteId,
 	};
 	const layout = instance.glyphLayoutFromString(options.text); // process the string to get default glyph run, then process that glyph run in GSUB and GPOS, yielding the actual glyphs to position
 
