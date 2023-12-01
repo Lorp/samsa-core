@@ -988,8 +988,6 @@ const TABLE_DECODERS = {
 	},
 }
 
-const SVG_PREAMBLE = `<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">\n<defs></defs>\n`; // we’ll replace <defs></defs> later if necessary
-
 // non-exported functions
 function endianness (str) {
 	const buf = new ArrayBuffer(2);
@@ -1023,6 +1021,16 @@ function validateTuple (tuple, axisCount) {
 			return false;
 	}
 	return true;
+}
+
+// take an object of attributes, and returning a string suitable for insertion into an XML tag (such as <svg> or <path>)
+function expandAttrs (attrs) {
+	let str = "";
+	for (let attr in attrs) {
+		if (attrs[attr] !== undefined)
+			str += ` ${attr}="${attrs[attr]}"`;
+	}
+	return str;
 }
 
 /*
@@ -4549,14 +4557,6 @@ SamsaGlyph.prototype.paint = function (context={}) {
 // - the main switch statement selects between the 4 paint types; paint types group paint formats together, and are stored in PAINT_TYPES; PAINT_COMPOSE is the only non-recursive paint type (paint format=32 is a special case which needs to recurse 2 paint trees before the compose operation)
 // - the result of a paintSVG() still needs to be wrapped in a <svg> element, and <defs> needs to be expanded
 SamsaGlyph.prototype.paintSVG = function (paint, context) {
-	function expandAttrs (attrs) {
-		let str = "";
-		for (let attr in attrs) {
-			if (attrs[attr] !== undefined)
-				str += ` ${attr}="${attrs[attr]}"`;
-		}
-		return str;
-	}
 
 	const font = context.font;
 	const defs = context.defs;
@@ -4992,9 +4992,7 @@ SamsaGlyph.prototype.svg = function (context={}) {
 
 	const font = this.font;
 
-	//console.log(`SVG-ing glyph ${this.id}, ${this.numPoints} points, ${this.numberOfContours} contours`);
 	// TODO: add a comment containin the string and glyphids that this svg represents (maybe use class or id in the <g> ?)
-	//let svgString = SVG_PREAMBLE;
 	let svgString = "";
 	// let extra = (style.class ? ` class="${style.class}"` : "")
 	//           + (style.fill ? ` fill="${style.fill}"` : "")
@@ -5010,15 +5008,14 @@ SamsaGlyph.prototype.svg = function (context={}) {
 
 	// TODO: remove this SVG wrapper so we can return multiple a glyph run in a single SVG
 	// - or maybe have a look thru an array of glyphs and offsets calculated from simple metrics or OpenType layout
-	svgString += `<g${extra}>\n`;
-	svgString += `<!-- glyph ${this.id} -->\n`;
+	svgString += `<g${extra}>`;
+	svgString += `<!-- glyph ${this.id} -->`;
 	
 	// attempt COLRv1, then COLRv0, then monochrome for this glyph
 	svgString += font.COLR ? this.svgGlyphCOLRv1(context) || this.svgGlyphCOLRv0(context) || this.svgGlyphMonochrome() : this.svgGlyphMonochrome(); // this the default auto mode // TODO: offer method to select a specific format
 	// - we can provide some results info in the context
-	//svgString += this.svgGlyphMonochrome(); // this the default auto mode // TODO: offer method to select a specific format
 
-	svgString += `\n</g>`;
+	svgString += `</g>`;
 	return svgString; // shall we just leave it like this?
 }
 
@@ -5498,6 +5495,7 @@ SamsaFont.prototype.renderText = function (options={}) {
 	}
 
 	const upem = this.head.unitsPerEm;
+	const scale = options.fontSize/upem;
 	const context = {
 		font: this,
 		instance: instance,
@@ -5505,29 +5503,31 @@ SamsaFont.prototype.renderText = function (options={}) {
 		paletteId: options.paletteId === undefined ? 0 : options.paletteId,
 	};
 	const layout = instance.glyphLayoutFromString(options.text); // process the string to get default glyph run, then process that glyph run in GSUB and GPOS, yielding the actual glyphs to position
-
+	const glyphRunWidth = layout.length ? layout[layout.length-1].ax + layout[layout.length-1].dx : 0;
 
 	if (options.format === "svg") {
 
 		let innerSVGComposition = "";
 		context.defs = {};
 
+		// process layout items
 		layout.forEach(layoutItem => {
 			const glyph = this.glyphs[layoutItem.id];
 			const iglyph = glyph.instantiate(instance);
 			const thisSVG = iglyph.svg(context); // gets the best possible COLR glyph, with monochrome fallback
 			innerSVGComposition += `<g transform="translate(${layoutItem.ax} 0)" fill="${this.hexColorFromU32(context.color)}">` + thisSVG + "</g>";
 		});
-			
-		const svgPreamble = `<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000" viewBox="0 0 2000 2000">`;
+		const svgWidth = Math.ceil(glyphRunWidth * scale); // does not account for glyph parts that protrude beyond the lsb or advance width, e.g. italic f in many fonts (need to check for bbox.xMin and bbox.xMax)
+		const svgHeight = 2 * Math.ceil(options.fontSize); // heuristic, seems to work ok, perhaps should be based on bbox.yMin of all glyphs or a descender metric
+		const svgPreamble = options.attributes
+							? `<svg${expandAttrs(options.attributes)}>` // custom attributes
+							: `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">`; // auto attributes
 		const svgPostamble = `</svg>`;
-		const scale = options.fontSize/upem;
 		const gPreamble = `<g transform="scale(${scale} ${-scale}) translate(0 ${-upem})">`;
 		const gPostamble = `</g>`;
 		const defs = Object.values(context.defs).join("");
 		
 		return svgPreamble + (defs ? `<defs>${defs}</defs>` : "") + gPreamble + innerSVGComposition + gPostamble + svgPostamble;
-
 	}
 }
 
