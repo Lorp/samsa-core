@@ -4004,7 +4004,6 @@ SamsaInstance.prototype.glyphAdvance = function (glyphId) {
 SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 	const font = this.font;
 	const cmap = font.cmap;
-	const glyphLayout = []; // we return this
 	let glyphRun = [];
 	const uvsEncoding = cmap.encodings[0x00000005]; // find Unicode Variation Sequence encoding, if any
 
@@ -4014,17 +4013,8 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 		for (let c=0; c < characters.length; c++) {
 			const char = characters[c]; // current character
 			const uni = char.codePointAt(0); // current codepoint, an integer <= 0x10FFFF
-			
-			// variation selectors: let’s ignore them (we don’t want .notdef to be displayed)
-			if (uni >= 0xfe00 && uni <= 0xfe0f) {
-				continue;
-			}
-	
-			// variation sequences can force emoji or text presentation
-			if (uvsEncoding && uvsEncoding.format === 14 && c < characters.length - 1) { // possible Unicode Variation Selector follows
-				//console.log("possible Unicode Variation Sequence");
-			}
-	
+			if (uni >= 0xfe00 && uni <= 0xfe0f) continue; // let’s ignore variation selectors (we don’t want .notdef to be displayed)
+			if (uvsEncoding && uvsEncoding.format === 14 && c < characters.length - 1) {} // possible Unicode Variation Selector follows (potentially forces emoji or text presentation)	
 			glyphRun.push(font.glyphIdFromUnicode(uni));
 		}	
 	}
@@ -4034,25 +4024,28 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 		glyphRun = input;
 	}
 
-	// process the glyph run in GSUB
+	// process the glyph run in GSUB and GPOS to yield a glyph layout array
 	glyphRun = this.glyphRunGSUB(glyphRun, { userFeatures: userFeatures }); // to specify script and language, use properties on options, e.g. script: "latn", language: "TRK "
-
-	// get initial layout array from glyph advance widths
-	// TODO: replace this with a getSimpleLayout() function
-	let x = 0, y = 0;
-	glyphRun.forEach(glyphId => {
-		const [dx, dy] = this.glyphAdvance(glyphId); // glyphAdvance() is responsible for decoding and instantiating the glyph if necessary
-		glyphLayout.push({ id: glyphId, ax: x, ay: y, dx: dx, dy: dy }); // an array of glyphPlacement objects, similar format to harfbuzz
-		x += dx; // horizontal advance
-		y += dy; // vertical advance
-	});
-
-
-	// process the initial layout in GPOS
-	const glyphLayoutGPOS = this.glyphLayoutGPOS(glyphLayout);
+	const glyphLayout = this.glyphLayoutSimple(glyphRun); // initial simple layout array from glyph advance widths
+	const glyphLayoutGPOS = this.glyphLayoutGPOS(glyphLayout); // process the initial layout array with GPOS
 
 	// it’s ready!
 	return glyphLayoutGPOS;
+}
+
+
+// SamsaInstance.glyphLayoutSimple()
+// - return a simple glyph layout array from a glyph run, based only on glyph advance widths
+SamsaInstance.prototype.glyphLayoutSimple = function (glyphRun) {
+	const layout = [];
+	let x = 0, y = 0;
+	glyphRun.forEach(glyphId => {
+		const [dx, dy] = this.glyphAdvance(glyphId); // glyphAdvance() is responsible for decoding and instantiating the glyph if necessary
+		layout.push({ id: glyphId, ax: x, ay: y, dx: dx, dy: dy }); // an array of glyphPlacement objects, similar format to harfbuzz
+		x += dx; // horizontal advance
+		y += dy; // vertical advance
+	});
+	return layout;
 }
 
 
@@ -4417,7 +4410,7 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 				classDef.classRanges = [];
 				const classRangeCount = buf.u16;
 				for (let i=0; i<classRangeCount; i++) {
-					classDef.classRanges.push({ startGlyphID: buf.u16, endGlyphID: buf.u16, class: buf.u16 });
+					classDef.classRanges.push(buf.u16array(3)); // startGlyphID, endGlyphID, class (faster than making an object)
 				}
 				break;
 			}
@@ -4438,13 +4431,13 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 			case 2: {
 				for (let r=0; r<classDef.classRanges.length; r++) {
 					const range = classDef.classRanges[r];
-					if (g >= range.startGlyphID) {
-						if (g <= range.endGlyphID) {
-							classId = range.class;
-						}
-						else {
-							break;
-						}
+					const [startGlyphID, endGlyphID] = range; // don’t assign class yet, as in general it’s not needed
+					if (g > endGlyphID) {
+						continue;
+					}
+					else if (g >= startGlyphID) {
+						classId = range[2]; // only assign this at the last moment
+						break;
 					}
 				}
 				break;
