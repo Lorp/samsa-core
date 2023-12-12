@@ -41,7 +41,8 @@ document.getElementById("myDiv").innerHTML = svg;
 
 If loading a font file from a remote URL, you’ll probably use `fetch()` then `response.arrayBuffer()` to obtain the ArrayBuffer. If a font file is dragged onto the browser, the ArrayBuffer is obtained by enumerating the `e.dataTransfer.items` array, where `e` is the drop event. For each `item` in the array (there may be multiple items), if its `kind` property is equal to `file`, set `file = item.getAsFile()` and the promise `file.arrayBuffer()` will yield the ArrayBuffer.
 
-Here is a high-level flowchart illustrating how Samsa creates a SamsaFont object from an ArrayBuffer, creates a SamsaInstance from the SamsaFont, then renders text as SVG.
+## Flow diagram
+The diagram illustrates how Samsa creates a SamsaFont object from an ArrayBuffer, creates a SamsaInstance from the SamsaFont, then renders text as SVG.
 
 ```mermaid
 flowchart TD
