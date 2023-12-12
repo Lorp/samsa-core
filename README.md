@@ -17,7 +17,7 @@ This repo is for Version 2 development. Version 1 is managed in the [Samsa GUI](
 
 ## How to use
 
-Here is a high-level flowchart illustrating how Samsa loads a font file, creates an instance and renders text.
+Here is a high-level flowchart illustrating how Samsa creates a SamsaFont object from an ArrayBuffer, creates a SamsaInstance from the SamsaFont, then renders text as SVG.
 
 ```mermaid
 flowchart TD
@@ -31,8 +31,9 @@ flowchart TD
 Here is sample code for Node.js that loads `filename` from disk, creates a SamsaFont object, creates a SamsaInstance object instance with variation axes set to certain locations, renders the string `hello, world!` as SVG, then saves the SVG to the file `render.svg`.
 
 ```javascript
-const arrayBuffer = fs.readFileSync(filename);
-const buffer = new SamsaBuffer(arrayBuffer);
+const nodeBuffer = fs.readFileSync(filename);
+const arrayBuffer = nodeBuffer.buffer;
+const samsaBuffer = new SamsaBuffer(arrayBuffer);
 const font = new SamsaFont(buffer);
 const instance = font.instance({wght: 900, wdth: 200});
 const svg = instance.renderText({text: "hello, world!", fontSize: 72 });
