@@ -17,15 +17,15 @@ This repo is for Version 2 development. Version 1 is managed in the [Samsa GUI](
 
 ## How to use
 
-Here is sample code for Node.js that loads `filename` from disk, creates a SamsaFont object, creates a SamsaInstance object instance with variation axes set to certain locations, renders the string `hello, world!` as SVG, then saves the SVG to the file `render.svg`.
+Here is sample code for Node.js that loads `filename` from disk, creates a SamsaFont object, creates a SamsaInstance object with variation axes set to certain locations, renders the string `hello, world!` as SVG, then saves the SVG to the file `render.svg`.
 
 ```javascript
 const nodeBuffer = fs.readFileSync(filename);
 const arrayBuffer = nodeBuffer.buffer;
 const samsaBuffer = new SamsaBuffer(arrayBuffer);
 const font = new SamsaFont(buffer);
-const instance = font.instance({wght: 900, wdth: 200});
-const svg = instance.renderText({text: "hello, world!", fontSize: 72 });
+const instance = font.instance({ wght: 900, wdth: 200 });
+const svg = instance.renderText({ text: "hello, world!", fontSize: 72 });
 fs.writeFileSync("render.svg", svg);
 ```
 
@@ -34,8 +34,8 @@ In a browser, you obtain an ArrayBuffer and process it similarly. The resulting 
 ```javascript
 const buffer = new SamsaBuffer(arrayBuffer);
 const font = new SamsaFont(buffer);
-const instance = font.instance({wght: 900, wdth: 200});
-const svg = instance.renderText({text: "hello, world!", fontSize: 72 });
+const instance = font.instance({ wght: 900, wdth: 200 });
+const svg = instance.renderText({ text: "hello, world!", fontSize: 72 });
 document.getElementById("myDiv").innerHTML = svg;
 ```
 
@@ -61,3 +61,8 @@ flowchart TD
 * [RenderStack](https://lorp.github.io/renderstack/dist/) ([repo](https://github.com/Lorp/renderstack))
 * [figma-colrv1](https://github.com/Lorp/figma-colrv1)
 * [Samsa-GUI](https://lorp.github.io/samsa/src/samsa-gui.html) ([repo](https://github.com/Lorp/samsa), uses Version 1, upgrade planned)
+
+## Links
+
+* [GitHub repo](https://github.com/Lorp/samsa-core)
+* [npm package](https://www.npmjs.com/package/samsa-core)
