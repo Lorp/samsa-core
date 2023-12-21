@@ -977,6 +977,10 @@ function validateTuple (tuple, axisCount) {
 	return true;
 }
 
+function validateTag (tag) {
+	return (table.tag.length === 4 && [...table.tag].every(ch => inRange(ch, 0x20, 0x7e) ) && !table.tag.match(/^.* [^ ]+.*$/)); // 1. Test length; 2. Test ASCII; 3. Test no non-terminating spaces
+}
+
 // take an object of attributes, and returning a string suitable for insertion into an XML tag (such as <svg> or <path>)
 function expandAttrs (attrs) {
 	let str = "";
@@ -3497,6 +3501,7 @@ class SamsaBuffer extends DataView {
 // - TODO: at some point we need it to work without loading all the glyphs into memory, so they stay in a file, e.g. options.glyphsOnDemand = true
 function SamsaFont(buf, options = {}) {
 
+	let valid = true;
 	console.log("SamsaFont!")
 
 	this.buf = buf; // SamsaBuffer
@@ -3509,10 +3514,33 @@ function SamsaFont(buf, options = {}) {
 	// font header
 	this.header = buf.decode(FORMATS.TableDirectory);
 
-	// create table directory
-	for (let t=0; t<this.header.numTables; t++) {
-		const table = buf.decode(FORMATS.TableRecord);
-		this.tableList.push(this.tables[table.tag] = table);
+	// validate the table header
+	if (12 + this.header.numTables * 16 > buf.length) {
+		valid = false;
+		console.error(`ERROR: Buffer too small to hold table directory of ${this.header.numTables} tables.`);
+	}
+	else {
+		// create table directory
+		for (let t=0; t<this.header.numTables; t++) {
+			const table = buf.decode(FORMATS.TableRecord);
+			
+			// validate the table record
+			if (!validateTag(table.tag)) {
+				valid = false;
+				console.error("ERROR: Table tag is not valid.");
+			}
+			else if (table.offset < 12 + this.header.numTables * 16 || table.offset + table.length > buf.length) {
+				valid = false;
+				console.error("ERROR: Table record references memory beyond valid part of the binary.");
+			}
+			else {
+				this.tableList.push(this.tables[table.tag] = table);
+			}
+		}
+	}
+
+	if (!valid) {
+		return null;
 	}
 
 	// load tables in the following order
@@ -4024,7 +4052,8 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 		glyphRun = input;
 	}
 
-	// process the glyph run in GSUB and GPOS to yield a glyph layout array
+	// shape the glyph run in GSUB and GPOS to yield a glyph layout array
+	// - this is the equivalent of HarfBuzz hb_shape()
 	glyphRun = this.glyphRunGSUB(glyphRun, { userFeatures: userFeatures }); // to specify script and language, use properties on options, e.g. script: "latn", language: "TRK "
 	const glyphLayout = this.glyphLayoutSimple(glyphRun); // initial simple layout array from glyph advance widths
 	const glyphLayoutGPOS = this.glyphLayoutGPOS(glyphLayout); // process the initial layout array with GPOS
@@ -4041,7 +4070,7 @@ SamsaInstance.prototype.glyphLayoutSimple = function (glyphRun) {
 	let x = 0, y = 0;
 	glyphRun.forEach(glyphId => {
 		const [dx, dy] = this.glyphAdvance(glyphId); // glyphAdvance() is responsible for decoding and instantiating the glyph if necessary
-		layout.push({ id: glyphId, ax: x, ay: y, dx: dx, dy: dy }); // an array of glyphPlacement objects, similar format to harfbuzz
+		layout.push({ id: glyphId, ax: x, ay: y, dx: dx, dy: dy }); // an array of glyphPlacement objects, similar format to HarfBuzz
 		x += dx; // horizontal advance
 		y += dy; // vertical advance
 	});
@@ -4630,7 +4659,16 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 	if (!gpos) return null; // no GPOS table, so no transformation // TODO: fix return value
 	const buf = gpos.buffer;
 	const layout = [];
-	inputLayout.forEach(layoutItem => layout.push({...layoutItem})); // copy the input layout, so we can mutate it without affecting the input
+	
+	// copy the input layout, so we can mutate it without affecting the input
+	inputLayout.forEach(layoutItem => {
+		const newLayoutItem = {};
+		Object.keys(layoutItem).forEach( key => newLayoutItem[key] = layoutItem[key] );
+		layout.push(newLayoutItem);
+	});
+
+	// hmm... outside of the plugin we had this one-liner working
+	// inputLayout.forEach(layoutItem => {console.log(layoutItem); layout.push({...layoutItem})}); // copy the input layout, so we can mutate it without affecting the input
 
 	// which script and language are active?
 	// TODO: do this only once for both GSUB and GPOS, as part of creating a SamsaIntance (there can always be a SamsaInstance method that updates script, language & features without creating a new instance)
