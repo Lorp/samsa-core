@@ -978,7 +978,7 @@ function validateTuple (tuple, axisCount) {
 }
 
 function validateTag (tag) {
-	return (table.tag.length === 4 && [...table.tag].every(ch => inRange(ch, 0x20, 0x7e) ) && !table.tag.match(/^.* [^ ]+.*$/)); // 1. Test length; 2. Test ASCII; 3. Test no non-terminating spaces
+	return (tag.length === 4 && [...tag].every(ch => inRange(ch.charCodeAt(0), 0x20, 0x7e)) && !tag.match(/^.* [^ ]+.*$/)); // 1. Test length; 2. Test ASCII; 3. Test no non-terminating spaces
 }
 
 // take an object of attributes, and returning a string suitable for insertion into an XML tag (such as <svg> or <path>)
@@ -3988,6 +3988,16 @@ function SamsaInstance(font, axisSettings={}, options={}) {
 }
 
 
+// convenience functions
+SamsaFont.prototype.axes = function () {
+	return this.fvar ? this.fvar.axes : [];
+}
+
+SamsaFont.prototype.instances = function () {
+	return this.fvar ? this.fvar.instances : [];
+}
+
+
 // SamsaInstance.glyphAdvance() - return the advance of a glyph
 // - we need this method in SamsaInstance, not SamsaGlyph, because SamsaGlyph might not be loaded (and we don’t need to load it, because we have hmtx and HVAR)
 // - if we have a variable font and HVAR is not present, we must load the glyph in order to know its variable advance
@@ -4056,10 +4066,10 @@ SamsaInstance.prototype.glyphLayoutFromString = function (input, userFeatures) {
 	// - this is the equivalent of HarfBuzz hb_shape()
 	glyphRun = this.glyphRunGSUB(glyphRun, { userFeatures: userFeatures }); // to specify script and language, use properties on options, e.g. script: "latn", language: "TRK "
 	const glyphLayout = this.glyphLayoutSimple(glyphRun); // initial simple layout array from glyph advance widths
-	const glyphLayoutGPOS = this.glyphLayoutGPOS(glyphLayout); // process the initial layout array with GPOS
+	const glyphLayoutFinal = this.glyphLayoutGPOS(glyphLayout); // returns the input if there is no GPOS table
 
 	// it’s ready!
-	return glyphLayoutGPOS;
+	return glyphLayoutFinal;
 }
 
 
@@ -4656,7 +4666,11 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 	// general setup
 	const font = this.font;
 	const gpos = font.GPOS;
-	if (!gpos) return null; // no GPOS table, so no transformation // TODO: fix return value
+
+	// no GPOS table, no transformation
+	if (!gpos)
+		return inputLayout;
+	
 	const buf = gpos.buffer;
 	const layout = [];
 	
@@ -4675,8 +4689,6 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 	const script = options.script && gpos.scripts[options.script] ? gpos.scripts[options.script] : gpos.scripts["DFLT"];
 	const langSys = options.language && script[options.language] ? script[options.language] : script["dflt"];
 	const requestedFeatures = options.userFeatures || {}; // object with keys as feature tags for keys, true/false for values
-
-
 
 	// features are defined by the spec to be on by default: the integer denotes which group they are in (0=initial, 1=normal, 2=custom)
 	const featureGroups = {
