@@ -17,6 +17,13 @@ This repo is for Version 2 development. Version 1 is managed in the [Samsa GUI](
 
 ## How to use
 
+The essential steps are:
+* load a font file into an _ArrayBuffer_
+* create a _SamsaBuffer_ object from the _ArrayBuffer_
+* create a _SamsaFont_ object from the _SamsaBuffer_
+* create a _SamsaInstance_ object from the _SamsaFont_
+* call `renderText()` on the _SamsaInstance_ to obtain SVG strings
+
 Here is sample code for Node.js that loads `filename` from disk, creates a SamsaFont object, creates a SamsaInstance object with variation axes set to certain locations, renders the string `hello, world!` as SVG, then saves the SVG to the file `render.svg`.
 
 ```javascript
