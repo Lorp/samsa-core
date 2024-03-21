@@ -4,6 +4,10 @@
 
 /*
 
+Find this on GitHub https://github.com/lorp/samsa-core
+Find this on NPM https://www.npmjs.com/package/samsa-core
+To update the NPM version, increment the version property in /package.json (not /src/package.json), then run `npm publish` from the root directory
+
 A note on variable naming. You may see a few of these:
 
 const _runCount = buf.u16; // get the data from the buffer
@@ -3394,15 +3398,15 @@ class SamsaBuffer extends DataView {
 				table.featureVariationsOffset = this.u32;
 			}
 
-			// get GPOS script list
+			// get script list
 			this.seek(table.scriptListOffset);
 			table.scripts = this.decodeScriptList();
 
-			// get GPOS features (initial data)
+			// get features (initial data)
 			this.seek(table.featureListOffset);
 			table.features = this.decodeFeatures();
 
-			// get GPOS lookup count
+			// get lookup count
 			this.seek(table.lookupListOffset);
 			table.lookupCount = this.u16;
 		}
