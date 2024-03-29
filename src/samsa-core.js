@@ -2673,7 +2673,7 @@ class SamsaBuffer extends DataView {
 			for (let i=0; i<operands.length; i++) {
 				const index = varIndexBase + i;
 				const [outer, inner] = colr.varIndexMapOffset ? colr.varIndexMap[index] : [index >>> 16, index & 0xffff]; // explicit or implicit mapping
-				if (outer != 0xffff && inner != 0xffff) {
+				if (outer !== 0xffff && inner !== 0xffff) {
 					operands[i] += deltas[outer][inner];
 				}
 			}
@@ -2783,10 +2783,8 @@ class SamsaBuffer extends DataView {
 			case 12: case 13: { // PaintTransform, PaintVarTransform
 				const nextOffset = this.u24;
 				const transformOffset = this.u24;
-				tell = this.tell();
 				this.seek(paint.offset + transformOffset);
 				readOperands(I32);
-				this.seek(tell);
 				addVariations(operands);
 				paint.matrix = [ operands[0]/0x10000, operands[1]/0x10000, operands[2]/0x10000, operands[3]/0x10000, operands[4]/0x10000, operands[5]/0x10000 ];
 				this.seek(paint.offset + nextOffset);
