@@ -792,7 +792,9 @@ const TABLE_DECODERS = {
 		fvar.axes = [];
 		buf.seek(fvar.axesArrayOffset);
 		for (let a=0; a<fvar.axisCount; a++) {
-			fvar.axes.push(buf.decode(FORMATS.VariationAxisRecord));
+			const axis = buf.decode(FORMATS.VariationAxisRecord);
+			axis.name = font.names[axis.axisNameID];
+			fvar.axes.push(axis);
 		}
 		fvar.instances = [];
 		const includePostScriptNameID = fvar.instanceSize == fvar.axisCount * 4 + 6; // instanceSize determins whether postScriptNameID is included
@@ -944,6 +946,86 @@ const TABLE_DECODERS = {
 			}
 		}
 	},
+}
+
+const TABLE_ENCODERS = {
+
+	"avar": (font, avar, buf) => {
+		// encode avar
+		// https://learn.microsoft.com/en-us/typography/opentype/spec/avar
+
+		if (!buf) {
+			buf = new SamsaBuffer(new ArrayBuffer(1024));
+		}
+
+		// avar1 and avar2
+
+		// create avar header
+		const bufAvarHeader = new SamsaBuffer(new ArrayBuffer(10000));
+		bufAvarHeader.u16 = avar.version[0]; // majorVersion
+		bufAvarHeader.u16 = avar.version[1]; // minorVersion
+		bufAvarHeader.u16 = 0; // reserved
+		bufAvarHeader.u16 = font.fvar.axisCount; // axisCount (avar 1) or axisSegmentMapCount (avar 2), note that 0 is rejected by Apple here: use axisCount and 0 for each positionMapCount
+
+		// create an empty axisSegmentMaps array if none is supplied
+		if (!avar.axisSegmentMaps)
+			avar.axisSegmentMaps = new Array(font.fvar.axisCount).fill([]);
+
+		// write the axisSegmentMaps
+		console.assert(avar.axisSegmentMaps.length === font.fvar.axisCount, "avar.axisSegmentMaps.length must match fvar.axisCount");
+		avar.axisSegmentMaps.forEach(axisSegmentMap => {
+			axisSegmentMap.forEach(segment => bufAvarHeader.f214_pascalArray = segment);
+		});
+
+		// avar2
+		if (avar.version[0] == 2) {
+			const avar1Length = bufAvarHeader.tell();
+			const axisIndexMapOffsetTell = avar1Length;
+			const varStoreOffsetTell = avar1Length + 4;
+
+			// write axisIndexMap
+			// - we are using only a single IVD, so the outer index is always zero
+			// - we keep it simple and always use 2 bytes (U16) for the inner index, even though axisCount is very rarely > 255
+			// - the index is a simple map, as axis index will be equal to inner index
+			bufAvarHeader.seek(avar1Length + 8); // skip to where we can start writing data
+			const axisIndexMapOffset = bufAvarHeader.tell();
+			const innerIndexBitCount = 16, entrySize = 2;
+			const indexMap = {
+				format: 0,
+				entryFormat: (innerIndexBitCount - 1) | ((entrySize -1) << 4), // resolves to 1 byte with value 31 (0x1F)
+				indices: new Array(font.fvar.axisCount).fill(0).map((v, i) => i), // create an array [0, 1, 2, 3, ... axisCount-1]
+			};
+
+			console.log("indexMap");
+			console.log(indexMap);
+
+			// write deltaSetIndexMap
+			bufAvarHeader.u8 = indexMap.format;
+			bufAvarHeader.u8 = indexMap.entryFormat;
+			if (indexMap.format === 0)
+				bufAvarHeader.u16 = indexMap.indices.length;
+			else if (indexMap.format === 1) {
+				bufAvarHeader.u32 = indexMap.indices.length;
+			}
+			indexMap.indices.forEach(index => bufAvarHeader.u16 = index);
+
+			// write varStore
+			const varStoreOffset = bufAvarHeader.tell();
+
+			// write the offsets to axisIndexMap and varStore
+			bufAvarHeader.seek(axisIndexMapOffsetTell);
+			bufAvarHeader.u32 = axisIndexMapOffset;
+			bufAvarHeader.seek(varStoreOffsetTell);
+			bufAvarHeader.u32 = varStoreOffset;
+
+		}
+
+
+		//console.log(bufAvarHeader);
+		return bufAvarHeader;
+
+	},
+
 }
 
 // non-exported functions
@@ -1464,6 +1546,12 @@ class SamsaBuffer extends DataView {
 	set f214(num) {
 		this.setInt16(this.p, num * 0x4000);
 		this.p += 2;
+	}
+
+	set f214_pascalArray(arr) {
+		this.setUint16(this.p, arr.length);
+		this.p += 2;
+		arr.forEach(num => {	console.log("writing", num); this.setInt16(this.p, num * 0x4000), this.p += 2});
 	}
 
 	get f214() {
@@ -2411,6 +2499,76 @@ class SamsaBuffer extends DataView {
 		return ivs;
 	}
 
+	encodeItemVariationStore(ivs) {
+
+		const ivsStart = this.tell(); // store location where we will write the ItemVariationStoreHeader
+		const variationRegionListOffset = 8 + 4 * ivs.ivds.length; // seek to where we can start writing variationRegionList
+
+		// write the region list
+		this.seek(variationRegionListOffset);
+		this.u16 = ivs.axisCount;
+		this.u16 = ivs.regions.length;
+
+		ivs.regions.forEach(region => {
+			region.forEach(dimension => {
+				this.f214 = dimension[0]; // start
+				this.f214 = dimension[1]; // peak
+				this.f214 = dimension[2]; // end
+			});
+		});
+
+		// for (let r=0; r<ivs.regionCount; r++) {
+		// 	const region = ivs.regions[r];
+		// 	for (let a=0; a<ivs.axisCount; a++) {
+		// 		this.f214 = region[a][0]; // start
+		// 		this.f214 = region[a][1]; // peak
+		// 		this.f214 = region[a][2]; // end
+		// 	}
+		// }
+		
+		// write the itemVariationDatas
+		const itemVariationDataOffsets = [];
+		ivs.ivds.forEach((ivd, ivdIndex) => {
+			itemVariationDataOffsets[ivdIndex] = this.tell();
+			//let wordDeltaCount = ivd.regionIds.length;
+
+			this.u16 = ivd.deltaSets.length; // itemCount == ivd.deltaSets.length
+			this.u16 = ivd.wordDeltaCount; // wordDeltaCount: this can safely be set to ivd.regionIds.length (TODO: optimize so we use wordDeltaCount)
+			this.u16 = ivd.regionIds.length;
+			for (let r=0; r<ivd.regionIds.length; r++) {
+				this.u16 = ivd.regionIds[r];
+			}
+
+			const wordDeltaCount = ivd.wordDeltaCount & 0x7fff;
+			const longWords = ivd.wordDeltaCount & 0x8000;
+			ivd.deltaSets.forEach(deltaSet => { // note that ivd.deltaSets.length === ivd.itemCount
+				deltaSet.forEach((delta, d) => {
+					if (d < wordDeltaCount)
+						{ if (longWords) this.i32 = delta; else this.i16 = delta; }
+					else
+						{ if (longWords) this.i16 = delta; else this.i8 = delta; }
+				});
+			});				
+		});
+
+		// when we exit this function, we position the pointer at the end of the IVS
+		const ivsEnd = this.tell();
+
+		// ItemVariationStoreHeader (write this last)
+		this.seek(ivsStart);
+		this.u16 = 1; // format
+		this.u32 = variationRegionListOffset;
+		this.u16 = ivs.ivds.length; // itemVariationDataCount
+
+		// write the ivd offsets
+		for (let ivdIndex=0; ivdIndex<ivs.ivds.length; ivdIndex++) {
+			this.u32 = itemVariationDataOffsets[ivdIndex];
+		}
+
+		// position the pointer correctly for the next write
+		this.seek(ivsEnd);
+	}
+
 	// parser for variationIndexMap
 	// - converts a compressed binary into an array of outer and inner values
 	// - each element in the returned array is an array of 2 elements made of [outer, inner]
@@ -2641,7 +2799,6 @@ class SamsaBuffer extends DataView {
 							pc++;
 						}
 					}
-					// after this, we no longer need pointIds, right? so it needn’t stick around as a property of the tvt (except for visualization)
 				}
 			}
 		}
@@ -3512,6 +3669,7 @@ function SamsaFont(buf, options = {}) {
 	this.glyphs = [];
 	this.ItemVariationStores = {}; // keys will be "avar", "MVAR", "COLR", "CFF2", "HVAR", "VVAR"... they all get recalculated when a new instance is requested
 	this.tableDecoders = TABLE_DECODERS; // we assign it here so we have access to it in code that imports the library
+	this.tableEncoders = TABLE_ENCODERS; // we assign it here so we have access to it in code that imports the library
 
 	// font header
 	this.header = buf.decode(FORMATS.TableDirectory);
