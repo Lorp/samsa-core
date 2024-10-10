@@ -30,7 +30,7 @@ Here is sample code for Node.js that loads `filename` from disk, creates a Samsa
 const nodeBuffer = fs.readFileSync(filename);
 const arrayBuffer = nodeBuffer.buffer;
 const samsaBuffer = new SamsaBuffer(arrayBuffer);
-const font = new SamsaFont(buffer);
+const font = new SamsaFont(samsaBuffer);
 const instance = font.instance({ wght: 900, wdth: 200 });
 const svg = instance.renderText({ text: "hello, world!", fontSize: 72 });
 fs.writeFileSync("render.svg", svg);
@@ -39,8 +39,8 @@ fs.writeFileSync("render.svg", svg);
 In a browser, you obtain an ArrayBuffer and process it similarly. The resulting SVG can be inserted into the DOM.
 
 ```javascript
-const buffer = new SamsaBuffer(arrayBuffer);
-const font = new SamsaFont(buffer);
+const samsaBuffer = new SamsaBuffer(arrayBuffer);
+const font = new SamsaFont(samsaBuffer);
 const instance = font.instance({ wght: 900, wdth: 200 });
 const svg = instance.renderText({ text: "hello, world!", fontSize: 72 });
 document.getElementById("myDiv").innerHTML = svg;
