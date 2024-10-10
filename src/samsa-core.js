@@ -27,7 +27,7 @@ const SAMSAGLOBAL = {
 	endianness: endianness(),
 	littleendian: endianness("LE"),
 	bigendian: endianness("BE"),
-	fingerprints: { WOFF2: 0x774f4632, TTF: 0x00010000, OTF: 0x4f54544f },
+	fingerprints: { WOFF2: 0x774f4632, TTF: 0x00010000, OTF: 0x4f54544f, true: 0x74727565 }, // 0x4f54544f/"OTTO" is for CFF fonts, 0x74727565/"true" is for Skia.ttf
 	stdGlyphNames: [".notdef",".null","nonmarkingreturn","space","exclam","quotedbl","numbersign","dollar","percent","ampersand","quotesingle","parenleft","parenright","asterisk","plus","comma","hyphen","period","slash","zero","one","two","three","four","five","six","seven","eight","nine","colon","semicolon","less","equal","greater","question","at","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","bracketleft","backslash","bracketright","asciicircum","underscore","grave","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","braceleft","bar","braceright","asciitilde","Adieresis","Aring","Ccedilla","Eacute","Ntilde","Odieresis","Udieresis","aacute","agrave","acircumflex","adieresis","atilde","aring","ccedilla","eacute","egrave","ecircumflex","edieresis","iacute","igrave","icircumflex","idieresis","ntilde","oacute","ograve","ocircumflex","odieresis","otilde","uacute","ugrave","ucircumflex","udieresis","dagger","degree","cent","sterling","section","bullet","paragraph","germandbls","registered","copyright","trademark","acute","dieresis","notequal","AE","Oslash","infinity","plusminus","lessequal","greaterequal","yen","mu","partialdiff","summation","product","pi","integral","ordfeminine","ordmasculine","Omega","ae","oslash","questiondown","exclamdown","logicalnot","radical","florin","approxequal","Delta","guillemotleft","guillemotright","ellipsis","nonbreakingspace","Agrave","Atilde","Otilde","OE","oe","endash","emdash","quotedblleft","quotedblright","quoteleft","quoteright","divide","lozenge","ydieresis","Ydieresis","fraction","currency","guilsinglleft","guilsinglright","fi","fl","daggerdbl","periodcentered","quotesinglbase","quotedblbase","perthousand","Acircumflex","Ecircumflex","Aacute","Edieresis","Egrave","Iacute","Icircumflex","Idieresis","Igrave","Oacute","Ocircumflex","apple","Ograve","Uacute","Ucircumflex","Ugrave","dotlessi","circumflex","tilde","macron","breve","dotaccent","ring","cedilla","hungarumlaut","ogonek","caron","Lslash","lslash","Scaron","scaron","Zcaron","zcaron","brokenbar","Eth","eth","Yacute","yacute","Thorn","thorn","minus","multiply","onesuperior","twosuperior","threesuperior","onehalf","onequarter","threequarters","franc","Gbreve","gbreve","Idotaccent","Scedilla","scedilla","Cacute","cacute","Ccaron","ccaron","dcroat"],
 };
 
@@ -179,7 +179,7 @@ const FORMATS = {
 		ySuperscriptYOffset: U16,
 		yStrikeoutSize: U16,
 		yStrikeoutPosition: U16,
-		sFamilyClass: U16,
+		sFamilyClass: I16,
 		panose: [U8,10],
 		ulUnicodeRange1: U32,
 		ulUnicodeRange2: U32,
@@ -189,9 +189,9 @@ const FORMATS = {
 		fsSelection: U16,
 		usFirstCharIndex: U16,
 		usLastCharIndex: U16,
-		sTypoAscender: U16,
-		sTypoDescender: U16,
-		sTypoLineGap: U16,
+		sTypoAscender: I16,
+		sTypoDescender: I16,
+		sTypoLineGap: I16,
 		usWinAscent: U16,
 		usWinDescent: U16,
 		_IF_: [["version", ">=", 1], {
@@ -199,8 +199,8 @@ const FORMATS = {
 			ulCodePageRange2: U32,
 		}],
 		_IF_2: [["version", ">=", 2], {
-			sxHeight: U16,
-			sCapHeight: U16,
+			sxHeight: I16,
+			sCapHeight: I16,
 			usDefaultChar: U16,
 			usBreakChar: U16,
 			usMaxContext: U16,
@@ -793,6 +793,7 @@ const TABLE_DECODERS = {
 		buf.seek(fvar.axesArrayOffset);
 		for (let a=0; a<fvar.axisCount; a++) {
 			const axis = buf.decode(FORMATS.VariationAxisRecord);
+			axis.axisId = a;
 			axis.name = font.names[axis.axisNameID];
 			fvar.axes.push(axis);
 		}
@@ -950,36 +951,39 @@ const TABLE_DECODERS = {
 
 const TABLE_ENCODERS = {
 
-	"avar": (font, avar, buf) => {
+	"avar": (font, avar) => {
 		// encode avar
 		// https://learn.microsoft.com/en-us/typography/opentype/spec/avar
-
-		if (!buf) {
-			buf = new SamsaBuffer(new ArrayBuffer(1024));
-		}
 
 		// avar1 and avar2
 
 		// create avar header
 		const bufAvarHeader = new SamsaBuffer(new ArrayBuffer(10000));
-		bufAvarHeader.u16 = avar.version[0]; // majorVersion
-		bufAvarHeader.u16 = avar.version[1]; // minorVersion
-		bufAvarHeader.u16 = 0; // reserved
-		bufAvarHeader.u16 = font.fvar.axisCount; // axisCount (avar 1) or axisSegmentMapCount (avar 2), note that 0 is rejected by Apple here: use axisCount and 0 for each positionMapCount
+		const majorVersion = avar.axisIndexMap && avar.ivsBuffer ? 2 : 1;
+		bufAvarHeader.u16_array = [
+			majorVersion,
+			0, // minorVersion
+			0, // reserved
+			font.fvar.axisCount]; // axisCount (avar 1) or axisSegmentMapCount (avar 2), note that 0 is rejected by Apple here: use axisCount and 0 for each positionMapCount
 
-		// create an empty axisSegmentMaps array if none is supplied
+		// avar1 per-axis segment mappings
+		// - create an empty axisSegmentMaps array if none is supplied
 		if (!avar.axisSegmentMaps)
 			avar.axisSegmentMaps = new Array(font.fvar.axisCount).fill([]);
 
-		// write the axisSegmentMaps
 		console.assert(avar.axisSegmentMaps.length === font.fvar.axisCount, "avar.axisSegmentMaps.length must match fvar.axisCount");
+
+		// - write the axisSegmentMaps
 		avar.axisSegmentMaps.forEach(axisSegmentMap => {
-			axisSegmentMap.forEach(segment => bufAvarHeader.f214_pascalArray = segment);
+			bufAvarHeader.u16 = axisSegmentMap.length; // write positionMapCount (=0 or >= 3)
+			axisSegmentMap.forEach(segment => bufAvarHeader.f214_array = segment); // for each axis, write an array of F214 pairs [fromCoordinate, toCoordinate]
 		});
 
-		// avar2
-		if (avar.version[0] == 2) {
-			const avar1Length = bufAvarHeader.tell();
+		const avar1Length = bufAvarHeader.tell();
+		let avar2Length;
+		
+		// avar2 only
+		if (majorVersion === 2) {
 			const axisIndexMapOffsetTell = avar1Length;
 			const varStoreOffsetTell = avar1Length + 4;
 
@@ -989,28 +993,19 @@ const TABLE_ENCODERS = {
 			// - the index is a simple map, as axis index will be equal to inner index
 			bufAvarHeader.seek(avar1Length + 8); // skip to where we can start writing data
 			const axisIndexMapOffset = bufAvarHeader.tell();
-			const innerIndexBitCount = 16, entrySize = 2;
-			const indexMap = {
-				format: 0,
-				entryFormat: (innerIndexBitCount - 1) | ((entrySize -1) << 4), // resolves to 1 byte with value 31 (0x1F)
-				indices: new Array(font.fvar.axisCount).fill(0).map((v, i) => i), // create an array [0, 1, 2, 3, ... axisCount-1]
-			};
-
-			console.log("indexMap");
-			console.log(indexMap);
-
-			// write deltaSetIndexMap
-			bufAvarHeader.u8 = indexMap.format;
-			bufAvarHeader.u8 = indexMap.entryFormat;
-			if (indexMap.format === 0)
-				bufAvarHeader.u16 = indexMap.indices.length;
-			else if (indexMap.format === 1) {
-				bufAvarHeader.u32 = indexMap.indices.length;
+			bufAvarHeader.u8 = avar.axisIndexMap.format;
+			bufAvarHeader.u8 = avar.axisIndexMap.entryFormat;
+			if (avar.axisIndexMap.format === 0)
+				bufAvarHeader.u16 = avar.axisIndexMap.indices.length;
+			else if (avar.axisIndexMap.format === 1) {
+				bufAvarHeader.u32 = avar.axisIndexMap.indices.length;
 			}
-			indexMap.indices.forEach(index => bufAvarHeader.u16 = index);
+			bufAvarHeader.u16_array = avar.axisIndexMap.indices;
 
 			// write varStore
 			const varStoreOffset = bufAvarHeader.tell();
+			bufAvarHeader.memcpy(avar.ivsBuffer);
+			avar2Length = bufAvarHeader.tell();
 
 			// write the offsets to axisIndexMap and varStore
 			bufAvarHeader.seek(axisIndexMapOffsetTell);
@@ -1020,9 +1015,16 @@ const TABLE_ENCODERS = {
 
 		}
 
+		const avarFinalSize = majorVersion === 1 ? avar1Length : avar2Length;
 
-		//console.log(bufAvarHeader);
-		return bufAvarHeader;
+
+		// attempt to decode
+		bufAvarHeader.seek(0);
+
+
+		font.avar = bufAvarHeader.decode(FORMATS["avar"])
+		TABLE_DECODERS["avar"](font, bufAvarHeader);
+		return new SamsaBuffer(bufAvarHeader.buffer, 0, avarFinalSize);
 
 	},
 
@@ -1361,6 +1363,15 @@ class SamsaBuffer extends DataView {
 		this.p += p;
 	}
 
+	memcpy(srcSamsaBuffer=this, dstOffset=this.p, srcOffset=0, len=srcSamsaBuffer.byteLength - srcOffset, padding=0, advanceDest=true) {
+		const dstArray = new Uint8Array(this.buffer, this.byteOffset + dstOffset, len);
+		const srcArray = new Uint8Array(srcSamsaBuffer.buffer, srcSamsaBuffer.byteOffset + srcOffset, len);
+		dstArray.set(srcArray);
+		this.p += len; // advance the destination pointer (will be undone later if advanceDest is false)
+		if (padding) this.padToModulo(padding);
+		if (!advanceDest) this.seek(dstOffset);
+	}
+
 	// validate offset
 	seekValid(p) {
 		return p >= 0 && p < this.byteLength;
@@ -1409,9 +1420,17 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
+	set u32_array(arr) {
+		arr.forEach(num => { this.setUint32(this.p, num), this.p += 4 });
+	}
+
 	set i32(num) {
 		this.setInt32(this.p, num);
 		this.p += 4;
+	}
+
+	set i32_array(arr) {
+		arr.forEach(num => { this.setInt32(this.p, num), this.p += 4 });
 	}
 
 	get i32() {
@@ -1445,6 +1464,16 @@ class SamsaBuffer extends DataView {
 				return accum;
 			}
 		}
+	}
+
+	// this was defined for VARC table 
+	get u32_var() {
+		let firstByte = this.u8;
+		if (firstByte < 0x80) return firstByte;
+		else if (firstByte < 0xc0) return ((firstByte & 0x3f) << 8) + this.u8;
+		else if (firstByte < 0xe0) return ((firstByte & 0x1f) << 16) + this.u16;
+		else if (firstByte < 0xf0) return ((firstByte & 0x0f) << 24) + this.u24;
+		return this.u32; // firstByte == 0xfx, ignore low 4 bits of firstByte (which should be 0 anyway)
 	}
 
 	// uint24, int24
@@ -1482,6 +1511,16 @@ class SamsaBuffer extends DataView {
 		const ret = this.getUint16(this.p);
 		this.p += 2;
 		return ret;
+	}
+
+	set u16_array(arr) {
+		arr.forEach(num => { this.setUint16(this.p, num), this.p += 2 });
+	}
+
+	set u16_pascalArray(arr) {
+		this.setUint16(this.p, arr.length);
+		this.p += 2;
+		arr.forEach(num => { this.setUint16(this.p, num), this.p += 2 });
 	}
 
 	// u16 for WOFF2: https://www.w3.org/TR/WOFF2/#255UInt16
@@ -1543,15 +1582,23 @@ class SamsaBuffer extends DataView {
 		return ret;
 	}
 
+	set i16_array(arr) {
+		arr.forEach(num => { this.setInt16(this.p, num), this.p += 2 });
+	}
+
 	set f214(num) {
 		this.setInt16(this.p, num * 0x4000);
 		this.p += 2;
 	}
 
+	set f214_array(arr) {
+		arr.forEach(num => { this.setInt16(this.p, num * 0x4000), this.p += 2 });
+	}
+
 	set f214_pascalArray(arr) {
 		this.setUint16(this.p, arr.length);
 		this.p += 2;
-		arr.forEach(num => {	console.log("writing", num); this.setInt16(this.p, num * 0x4000), this.p += 2});
+		arr.forEach(num => { this.setInt16(this.p, num * 0x4000), this.p += 2 });
 	}
 
 	get f214() {
@@ -1569,8 +1616,16 @@ class SamsaBuffer extends DataView {
 		return this.getUint8(this.p++);
 	}
 
+	set u8_array(arr) {
+		arr.forEach(num => this.setUint8(this.p++, num));
+	}
+
 	set i8(num) {
 		this.setInt8(this.p++, num);
+	}
+
+	set i8_array(arr) {
+		arr.forEach(num => this.setInt8(this.p++, num));
 	}
 
 	get i8() {
@@ -1604,7 +1659,7 @@ class SamsaBuffer extends DataView {
 
 	// tag
 	set tag(str) {
-		let length = 4;
+		const length = 4;
 		for (let i = 0; i < length; i++) {
 			this.setUint8(this.p++, str.charCodeAt(i));
 		}
@@ -1612,7 +1667,7 @@ class SamsaBuffer extends DataView {
 
 	get tag() {
 		let ret = "";
-		let length = 4;
+		const length = 4;
 		for (let i = 0; i < length; i++) {
 			ret += String.fromCharCode(this.getUint8(this.p++));
 		}
@@ -1735,6 +1790,12 @@ class SamsaBuffer extends DataView {
 		sum >>>= 0; // unnecessary?
 		this.seek(pSaved);
 		return sum;
+	}
+
+	tableDirectoryEntry(table) {
+		let tagU32 = 0;
+		for (let c=0; c<4; c++) tagU32 += table.tag.charCodeAt(c) << (24 - c*8);
+		return [tagU32, table.checkSum, table.offset, table.length];
 	}
 
 	decode(objType, arg0, arg1, arg2) { // TODO: test first for typeof objType[key] == "number" as it’s the most common
@@ -2051,7 +2112,7 @@ class SamsaBuffer extends DataView {
 				if (points && points[0]) {
 					let xMin, xMax, yMin, yMax;
 					[xMin,yMin] = [xMax,yMax] = points[0];
-					for (pt=1; pt<numPoints; pt++) {
+					for (let pt=1; pt<numPoints; pt++) {
 						const P = points[pt][0], Q = points[pt][1];
 						if (P<xMin)
 							xMin=P;
@@ -2223,7 +2284,6 @@ class SamsaBuffer extends DataView {
 			else {
 
 				// options.compression != 2
-				let pt;
 
 				// new header with bbox
 				this.encode(FORMATS.GlyphHeader, glyph);
@@ -2251,17 +2311,17 @@ class SamsaBuffer extends DataView {
 						// - a bit faster, but does not work on LE platforms such as Mac M1
 						const fArray = new Uint8Array(this, this.p);
 						fArray[0] = points[0][2] & (options.overlapSimple ? 0x40 : 0x00); // first byte may have an overlap flag
-						for (pt=1; pt<numPoints; pt++) {
+						for (let pt=1; pt<numPoints; pt++) {
 							fArray[pt] = points[pt][2];
 						}
 
 						const pArray = new Int16Array(this, this.p + numPoints); // dangerous, since Int16Array uses platform byte order (M1 Mac does)
-						for (pt=0; pt<numPoints; pt++) {
+						for (let pt=0; pt<numPoints; pt++) {
 							const x = points[pt][0];
 							pArray[pt] = x - cx;
 							cx = x;
 						}
-						for (pt=0; pt<numPoints; pt++) {	
+						for (let pt=0; pt<numPoints; pt++) {	
 							const y = points[pt][1];
 							pArray[numPoints+pt] = y - cy;
 							cy = y;
@@ -2271,17 +2331,17 @@ class SamsaBuffer extends DataView {
 					else {
 						// DataView method
 						this.u8 = points[0][2] & (options.overlapSimple ? 0x40 : 0x00); // first byte may have an overlap flag
-						for (pt=1; pt<numPoints; pt++) {
+						for (let pt=1; pt<numPoints; pt++) {
 							this.u8 = points[pt][2]; // write 1 byte for flag
 						}
 
-						for (pt=0; pt<numPoints; pt++) {
+						for (let pt=0; pt<numPoints; pt++) {
 							const x = points[pt][0]
 							this.i16 = x - cx; // write 2 bytes for dx
 							cx = x;
 						}
 
-						for (pt=0; pt<numPoints; pt++) {	
+						for (let pt=0; pt<numPoints; pt++) {	
 							const y = points[pt][1];
 							this.i16 = y - cy; // write 2 bytes for dy
 							cy = y;
@@ -2297,7 +2357,7 @@ class SamsaBuffer extends DataView {
 					let cx=0, cy=0;
 					const dx=[], dy=[], flags=[];
 			
-					for (pt=0; pt<numPoints; pt++) {
+					for (let pt=0; pt<numPoints; pt++) {
 						const X = dx[pt] = Math.round(points[pt][0]) - cx;
 						const Y = dy[pt] = Math.round(points[pt][1]) - cy;
 						let f = points[pt][2] & 0xc1; // preserve bits 0 (on-curve), 6 (overlaps), 7 (reserved)
@@ -2322,7 +2382,7 @@ class SamsaBuffer extends DataView {
 		
 					// write flags with RLE
 					let rpt = 0;
-					for (pt=0; pt<numPoints; pt++) {
+					for (let pt=0; pt<numPoints; pt++) {
 						if (pt > 0 && rpt < 255 && flags[pt] == flags[pt-1]) {
 							rpt++;
 						}
@@ -2345,7 +2405,7 @@ class SamsaBuffer extends DataView {
 					}
 		
 					// write point coordinates
-					for (pt=0; pt<numPoints; pt++) {
+					for (let pt=0; pt<numPoints; pt++) {
 						if (dx[pt] == 0)
 							continue;
 						if (dx[pt] >= -255 && dx[pt] <= 255)
@@ -2353,7 +2413,7 @@ class SamsaBuffer extends DataView {
 						else
 							this.i16 = dx[pt];
 					}
-					for (pt=0; pt<numPoints; pt++) {
+					for (let pt=0; pt<numPoints; pt++) {
 						if (dy[pt] == 0)
 							continue;
 						if (dy[pt] >= -255 && dy[pt] <= 255)
@@ -2445,7 +2505,7 @@ class SamsaBuffer extends DataView {
 		this.seek(ivsStart + ivs.regionListOffset);
 
 		ivs.axisCount = this.u16;
-		ivs.regionCount = this.u16;
+		ivs.regionCount = this.u16; // ivs.regionCount may be 0
 		ivs.regions = []; // get the regions
 
 		for (let r=0; r<ivs.regionCount; r++) {
@@ -2470,7 +2530,7 @@ class SamsaBuffer extends DataView {
 			const longWords = wordDeltaCount & 0x8000;
 			wordDeltaCount &= 0x7fff; // fix the value for use
 			console.assert(ivd.itemCount >0, "ivd.itemCount should be >0 but is 0");
-			console.assert(wordDeltaCount <= regionCount, "wordDeltaCount should nicely be <= regionCount");
+			console.assert(wordDeltaCount <= regionCount, "wordDeltaCount should be <= regionCount");
 			console.assert(regionCount > 0, "regionCount should be >0 but is 0 (non fatal)", wordDeltaCount,  ivd);
 			if (ivd.itemCount > 0 && regionCount > 0 && wordDeltaCount <= regionCount) { // skip bad IVDs (some old font builds have regionCount==0, but they seem harmless if skipped)
 	
@@ -2506,67 +2566,44 @@ class SamsaBuffer extends DataView {
 
 		// write the region list
 		this.seek(variationRegionListOffset);
-		this.u16 = ivs.axisCount;
-		this.u16 = ivs.regions.length;
-
-		ivs.regions.forEach(region => {
-			region.forEach(dimension => {
-				this.f214 = dimension[0]; // start
-				this.f214 = dimension[1]; // peak
-				this.f214 = dimension[2]; // end
-			});
-		});
-
-		// for (let r=0; r<ivs.regionCount; r++) {
-		// 	const region = ivs.regions[r];
-		// 	for (let a=0; a<ivs.axisCount; a++) {
-		// 		this.f214 = region[a][0]; // start
-		// 		this.f214 = region[a][1]; // peak
-		// 		this.f214 = region[a][2]; // end
-		// 	}
-		// }
+		this.u16_array = [ivs.axisCount, ivs.regions.length];
+		ivs.regions.forEach(region => region.forEach(dimension => this.f214_array = dimension));
 		
 		// write the itemVariationDatas
 		const itemVariationDataOffsets = [];
 		ivs.ivds.forEach((ivd, ivdIndex) => {
 			itemVariationDataOffsets[ivdIndex] = this.tell();
-			//let wordDeltaCount = ivd.regionIds.length;
+			const wordDeltaCount = ivd.regionIds.length; // let’s do this for now
+			const longWords = 0; // if set, value is 0x8000
 
-			this.u16 = ivd.deltaSets.length; // itemCount == ivd.deltaSets.length
-			this.u16 = ivd.wordDeltaCount; // wordDeltaCount: this can safely be set to ivd.regionIds.length (TODO: optimize so we use wordDeltaCount)
-			this.u16 = ivd.regionIds.length;
-			for (let r=0; r<ivd.regionIds.length; r++) {
-				this.u16 = ivd.regionIds[r];
-			}
+			this.u16_array = [
+				ivd.deltaSets.length, // itemCount == ivd.deltaSets.length
+				wordDeltaCount | longWords, // wordDeltaCount: this can safely be set to ivd.regionIds.length (TODO: optimize to save bytes)
+				ivd.regionIds.length,
+				...ivd.regionIds,
+			];
 
-			const wordDeltaCount = ivd.wordDeltaCount & 0x7fff;
-			const longWords = ivd.wordDeltaCount & 0x8000;
-			ivd.deltaSets.forEach(deltaSet => { // note that ivd.deltaSets.length === ivd.itemCount
-				deltaSet.forEach((delta, d) => {
-					if (d < wordDeltaCount)
-						{ if (longWords) this.i32 = delta; else this.i16 = delta; }
-					else
-						{ if (longWords) this.i16 = delta; else this.i8 = delta; }
-				});
-			});				
+			ivd.deltaSets.forEach(deltaSet => {
+				const wordDeltas = deltaSet.slice(0, wordDeltaCount);
+				const otherDeltas = deltaSet.slice(wordDeltaCount);
+				if (longWords) {
+					this.i32_array = wordDeltas; this.i16_array = otherDeltas;
+				}
+				else {
+					this.i16_array = wordDeltas; this.i8_array = otherDeltas;
+				}
+			});
 		});
 
-		// when we exit this function, we position the pointer at the end of the IVS
-		const ivsEnd = this.tell();
-
-		// ItemVariationStoreHeader (write this last)
+		// write the header, set the pointer to the end of the buffer, then return
+		const ivsEnd = this.tell(); // when we exit, we position the pointer at the end of the IVS
 		this.seek(ivsStart);
 		this.u16 = 1; // format
 		this.u32 = variationRegionListOffset;
 		this.u16 = ivs.ivds.length; // itemVariationDataCount
-
-		// write the ivd offsets
-		for (let ivdIndex=0; ivdIndex<ivs.ivds.length; ivdIndex++) {
-			this.u32 = itemVariationDataOffsets[ivdIndex];
-		}
-
-		// position the pointer correctly for the next write
-		this.seek(ivsEnd);
+		this.u32_array = itemVariationDataOffsets; // multiple ivd offsets
+		this.seek(ivsEnd); // position the pointer correctly for the next write
+		return ivsEnd - ivsStart; // return the size of the binary ItemVariationStore
 	}
 
 	// parser for variationIndexMap
@@ -2799,6 +2836,7 @@ class SamsaBuffer extends DataView {
 							pc++;
 						}
 					}
+					// after this, we no longer need pointIds, right? so it needn’t stick around as a property of the tvt (except for visualization)
 				}
 			}
 		}
@@ -2940,8 +2978,10 @@ class SamsaBuffer extends DataView {
 			case 12: case 13: { // PaintTransform, PaintVarTransform
 				const nextOffset = this.u24;
 				const transformOffset = this.u24;
+				tell = this.tell();
 				this.seek(paint.offset + transformOffset);
 				readOperands(I32);
+				this.seek(tell);
 				addVariations(operands);
 				paint.matrix = [ operands[0]/0x10000, operands[1]/0x10000, operands[2]/0x10000, operands[3]/0x10000, operands[4]/0x10000, operands[5]/0x10000 ];
 				this.seek(paint.offset + nextOffset);
@@ -3113,7 +3153,7 @@ class SamsaBuffer extends DataView {
 		});
 
 		// create SamsaBuffer for output font and a Uint8Array view on it
-		const outputBuf = new SamsaBuffer(new ArrayBuffer(25000000)); // hmm, we should allocate more intelligently
+		const outputBuf = new SamsaBuffer(new ArrayBuffer(5000000)); // hmm, we should allocate more intelligently
 		const outputBufU8 = new Uint8Array(outputBuf.buffer); // we can use outputBufU8[outputBuf.p] to write bytes to the current buffer position
 		
 		// skip header for now, we’ll write it later
@@ -3518,7 +3558,7 @@ class SamsaBuffer extends DataView {
 		outputBuf.seek(0);
 		outputBuf.u32 = header.flavor;
 		outputBuf.u16 = tables.length;
-		outputBuf.seek(12);
+		outputBuf.seek(12); // skip binary search params
 		tables
 			.sort((a,b) => { if (a.tag < b.tag) return -1; if (a.tag > b.tag) return 1; return 0; }) // sort by tag
 			.forEach(table => {
@@ -3648,7 +3688,6 @@ class SamsaBuffer extends DataView {
 		return coverage;
 	}
 
-
 }
 
 
@@ -3675,7 +3714,11 @@ function SamsaFont(buf, options = {}) {
 	this.header = buf.decode(FORMATS.TableDirectory);
 
 	// validate the table header
-	if (12 + this.header.numTables * 16 > buf.length) {
+	if (this.header.numTables > 100) {
+		valid = false;
+		console.error("ERROR: Too many tables:", this.header.numTables);
+	}
+	else if (12 + this.header.numTables * 16 > buf.length) {
 		valid = false;
 		console.error(`ERROR: Buffer too small to hold table directory of ${this.header.numTables} tables.`);
 	}
@@ -3687,7 +3730,7 @@ function SamsaFont(buf, options = {}) {
 			// validate the table record
 			if (!validateTag(table.tag)) {
 				valid = false;
-				console.error("ERROR: Table tag is not valid.");
+				console.error(`ERROR: Table tag is not valid: (${table.tag}).`);
 			}
 			else if (table.offset < 12 + this.header.numTables * 16 || table.offset + table.length > buf.length) {
 				valid = false;
@@ -3698,6 +3741,11 @@ function SamsaFont(buf, options = {}) {
 			}
 		}
 	}
+
+	// assign the buffer attribute to each table
+	this.tableList.forEach(table => {
+		table.buffer = this.bufferFromTable(table.tag);
+	});
 
 	if (!valid) {
 		return null;
@@ -3713,10 +3761,9 @@ function SamsaFont(buf, options = {}) {
 		}
 
 		if (this.tables[tag]) {
-			console.log("Loading table: ", tag);
-			const tbuf = this.bufferFromTable(tag); // wouldn’t it be a good idea to store all these buffers as font.avar.buffer, font.COLR.buffer, etc. ?
 
 			// decode first part of table (or create an empty object)
+			const tbuf = this.tables[tag].buffer;
 			this[tag] = FORMATS[tag] ? tbuf.decode(FORMATS[tag]) : {};
 			this[tag].buffer = tbuf;
 
@@ -3958,6 +4005,18 @@ SamsaFont.prototype.u32FromHexColor = function (hex, opacity=1) {
 	}
 }
 
+SamsaFont.prototype.binarySearchParams = function (num) {
+	let sr=1, es=0, rs;
+	while (sr*2 <= num) {
+		sr*=2;
+		es++;
+	}
+	sr *= 16;
+	rs = (16*num)-sr;
+	return [sr, es, rs]; // searchRange, entrySelector, rangeShift
+}
+
+
 
 //////////////////////////////////
 //  tupleFromFvs()
@@ -4030,6 +4089,15 @@ function SamsaInstance(font, axisSettings={}, options={}) {
 	for (let a=0; a<axisCount; a++) {
 		tuple[a] = Math.round(tuple[a] * 16384) / 16384;
 	}
+
+	// set isDefault
+	this.isDefault = true;
+	for (let v of tuple) {
+		if (v) {
+			this.isDefault = false;
+			break;
+		}
+	}		
 
 	// avar mappings must come first! since all subsequent variation operation use the tuple remapped by avar
 	// - the tuple supplied to the SamsaInstance() constructor is modified here (maybe it should be a copy)
