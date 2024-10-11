@@ -1069,6 +1069,10 @@ function validateTag (tag) {
 	return (tag.length === 4 && [...tag].every(ch => inRange(ch.charCodeAt(0), 0x20, 0x7e)) && !tag.match(/^.* [^ ]+.*$/)); // 1. Test length; 2. Test ASCII; 3. Test no non-terminating spaces
 }
 
+function compareString (a, b) {
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
 // take an object of attributes, and returning a string suitable for insertion into an XML tag (such as <svg> or <path>)
 function expandAttrs (attrs) {
 	let str = "";
@@ -3560,13 +3564,8 @@ class SamsaBuffer extends DataView {
 		outputBuf.u16 = tables.length;
 		outputBuf.seek(12); // skip binary search params
 		tables
-			.sort((a,b) => { if (a.tag < b.tag) return -1; if (a.tag > b.tag) return 1; return 0; }) // sort by tag
-			.forEach(table => {
-				outputBuf.tag = table.tag;
-				outputBuf.u32 = table.checkSum; // not yet calculating checksum
-				outputBuf.u32 = table.offset;
-				outputBuf.u32 = table.length;
-			});
+			.sort((a,b) => compareString(a.tag, b.tag)) // sort by tag
+			.forEach(table => outputBuf.u32_array = this.tableDirectoryEntry(table)); // write the 4 U32s of the table directory entry
 
 		// write final file
 		const finalBufferU8 = new Uint8Array(outputBufU8.buffer, 0, finalLength);
@@ -4141,7 +4140,7 @@ function SamsaInstance(font, axisSettings={}, options={}) {
 					outer = a >> 16; // yes, I know this will always be 0
 					inner = a & 0xffff; // yes, I know this will always be a
 				}
-				if (outer != 0xffff && inner != 0xffff) { // if this entry is non-null... (hmm, might be nicer to have created a sparse array in the first place, skipping nulls and thus avoiding this check)
+				if (outer !== 0xffff && inner !== 0xffff) { // if this entry is non-null... (hmm, might be nicer to have created a sparse array in the first place, skipping nulls and thus avoiding this check)
 					tuple[a] += Math.round(deltas[outer][inner]) / 0x4000; // add the interpolated delta to tuple[a]; note that the spec provides an integer method for rounding
 					tuple[a] = clamp(tuple[a], -1, 1); // clamp the result to [-1,1]
 				}
