@@ -17,6 +17,7 @@ The underscore prefix is intended to mean the initial version of the variable (_
 accurately reflect fields described in the spec, derive some data from flags, then use them under similar name for the purpose decribed by the name.
 
 2023-07-27: All occurrences of "??" nullish coalescing operator have been replaced (it’s not supported by something in the Figma plugin build process). The ?? lines remain as comments above their replacements.
+2024-10-10: Allowed "??" and "??=" nullish operators.
 
 */
 
@@ -1932,8 +1933,7 @@ class SamsaBuffer extends DataView {
 
 	decodeGlyph(numBytes, options={}) {
 		
-		//const metrics = options.metrics ?? [0, 0, 0, 0];
-		const metrics = options.metrics === undefined ? [0, 0, 0, 0] : options.metrics;
+		const metrics = options.metrics ?? [0, 0, 0, 0];
 		const glyph = numBytes ? new SamsaGlyph(this.decode(FORMATS.GlyphHeader)) : new SamsaGlyph();
 		if (options.id)
 			glyph.id = options.id;
@@ -2048,14 +2048,14 @@ class SamsaBuffer extends DataView {
 		}
 
 		// TODO: fix the metrics points
-		// glyph.points[glyph.numPoints]   = [metrics[0] ?? 0,               0, 0]; // H: Left side bearing point
-		// glyph.points[glyph.numPoints+1] = [metrics[1] ?? 0,               0, 0]; // H: Right side bearing point
-		// glyph.points[glyph.numPoints+2] = [              0, metrics[2] ?? 0, 0]; // V: Top side bearing point
-		// glyph.points[glyph.numPoints+3] = [              0, metrics[3] ?? 0, 0]; // V: Bottom side bearing point
-		glyph.points[glyph.numPoints]   = [metrics[0] ? metrics[0] : 0,               0, 0]; // H: Left side bearing point
-		glyph.points[glyph.numPoints+1] = [metrics[1] ? metrics[1] : 0,               0, 0]; // H: Right side bearing point
-		glyph.points[glyph.numPoints+2] = [              0, metrics[2] ? metrics[2] : 0, 0]; // V: Top side bearing point
-		glyph.points[glyph.numPoints+3] = [              0, metrics[3] ? metrics[3] : 0, 0]; // V: Bottom side bearing point
+		glyph.points[glyph.numPoints]   = [metrics[0] ?? 0,               0, 0]; // H: Left side bearing point
+		glyph.points[glyph.numPoints+1] = [metrics[1] ?? 0,               0, 0]; // H: Right side bearing point
+		glyph.points[glyph.numPoints+2] = [              0, metrics[2] ?? 0, 0]; // V: Top side bearing point
+		glyph.points[glyph.numPoints+3] = [              0, metrics[3] ?? 0, 0]; // V: Bottom side bearing point
+		// glyph.points[glyph.numPoints]   = [metrics[0] ? metrics[0] : 0,               0, 0]; // H: Left side bearing point
+		// glyph.points[glyph.numPoints+1] = [metrics[1] ? metrics[1] : 0,               0, 0]; // H: Right side bearing point
+		// glyph.points[glyph.numPoints+2] = [              0, metrics[2] ? metrics[2] : 0, 0]; // V: Top side bearing point
+		// glyph.points[glyph.numPoints+3] = [              0, metrics[3] ? metrics[3] : 0, 0]; // V: Bottom side bearing point
 	
 		return glyph;
 	}
@@ -3913,8 +3913,7 @@ SamsaFont.prototype.glyphIdFromUnicode = function (uni) {
 		switch (encoding.format) {
 
 			case 0: { // "Byte encoding table"
-				//g = encoding.mapping[uni] ?? 0;
-				g = encoding.mapping[uni] ? encoding.mapping[uni] : 0;
+				g = encoding.mapping[uni] ?? 0;
 				break;
 			}
 
@@ -5117,13 +5116,10 @@ SamsaInstance.prototype.renderText = function (options={}) {
 
 	// defaults
 	// - these would be nicer with the nullish operator ??= (but somewhere in the build procedure to Figma, mullish operators are not supported)
-	if (options.text === undefined) 
-		options.text = "hello, world!";
-	if (options.fontSize === undefined) 
-		options.fontSize = 12;
-	if (options.format === undefined) 
-		options.format = "svg";
-	
+	options.text     ??= "hello, world!";
+	options.fontSize ??= 12;
+	options.format   ??= "svg";
+
 	const font = this.font;
 	const upem = font.head.unitsPerEm;
 	const scale = options.fontSize/upem;
@@ -5640,7 +5636,6 @@ SamsaGlyph.prototype.exportPath = function (ctx) {
 
 			// LOOP 1: convert the glyph contours into an SVG-compatible contours array
 			startPt = 0;
-			//this.endPts.forEach(endPt => {
 			glyph.endPts.forEach(endPt => {
 				
 				contourLen = endPt-startPt+1; // number of points in this contour
@@ -5648,8 +5643,6 @@ SamsaGlyph.prototype.exportPath = function (ctx) {
 
 				// insert on-curve points between any two consecutive off-curve points
 				for (p=startPt; p<=endPt; p++) {
-					// pt = this.points[p];
-					// pt_ = this.points[(p-startPt+1)%contourLen+startPt];
 					pt = glyph.points[p];
 					pt_ = glyph.points[(p-startPt+1)%contourLen+startPt];
 					contour.push (pt);
@@ -5668,7 +5661,7 @@ SamsaGlyph.prototype.exportPath = function (ctx) {
 
 			// LOOP 2: convert contours array to an actual SVG path
 			// - we’ve already fixed things in loop 1 so there are never consecutive off-curve points
-			contours.forEach(contour => {
+			for (const contour of contours) {
 				for (p=0; p<contour.length; p++) {
 					pt = contour[p];
 					if (p==0) {
@@ -5685,7 +5678,7 @@ SamsaGlyph.prototype.exportPath = function (ctx) {
 					}
 				}
 				ctx.closepath();
-			});
+			}
 
 			break;
 
@@ -6048,8 +6041,7 @@ SamsaGlyph.prototype.svgGlyphCOLRv0 = function (context={}) { // we need to poss
 		const buf = font.bufferFromTable("COLR");
 		const colr = font.COLR;
 		const cpal = font.CPAL;
-		//const defaultColor = context.color ?? 0x000000ff; // default color // allows 0x000000000 (a valid transparent color)
-		const defaultColor = context.color === undefined ? 0x000000ff : context.color; // default color // allows 0x000000000 (a valid transparent color)
+		const defaultColor = context.color ?? 0x000000ff; // default color // allows 0x000000000 (a valid transparent color)
 		const palette = cpal.palettes[context.paletteId || 0];
 		let paths = "";
 		// TODO: store these paths in defs for efficient reuse
