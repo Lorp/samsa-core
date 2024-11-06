@@ -1519,13 +1519,39 @@ class SamsaBuffer extends DataView {
 	}
 
 	set u16_array(arr) {
-		arr.forEach(num => { this.setUint16(this.p, num), this.p += 2 });
+		for (const num of arr) {
+			this.setUint16(this.p, num);
+			this.p += 2;
+		}
+	}
+
+	u16_arrayOfLength(count) { // we can’t use a getter as it needs an argument
+		const arr = [];
+		while (count--) {
+			arr.push(this.getUint16(this.p));
+			this.p+=2;
+		}
+		return arr;
 	}
 
 	set u16_pascalArray(arr) {
-		this.setUint16(this.p, arr.length);
+		this.setUint16(arr.length);
 		this.p += 2;
-		arr.forEach(num => { this.setUint16(this.p, num), this.p += 2 });
+		for (const num of arr) {
+			this.setUint16(this.p, num);
+			this.p += 2;
+		}
+	}
+
+	get u16_pascalArray() {
+		const arr = [];
+		let count = this.getUint16(this.p);
+		this.p+=2;
+		while (count--) {
+			arr.push(this.getUint16(this.p));
+			this.p+=2;
+		}
+		return arr;
 	}
 
 	// u16 for WOFF2: https://www.w3.org/TR/WOFF2/#255UInt16
@@ -1588,6 +1614,12 @@ class SamsaBuffer extends DataView {
 	}
 
 	set i16_array(arr) {
+		arr.forEach(num => { this.setInt16(this.p, num), this.p += 2 });
+	}
+
+	set i16_pascalArray(arr) {
+		this.setUint16(this.p, arr.length);
+		this.p += 2;
 		arr.forEach(num => { this.setInt16(this.p, num), this.p += 2 });
 	}
 
@@ -1677,67 +1709,6 @@ class SamsaBuffer extends DataView {
 			ret += String.fromCharCode(this.getUint8(this.p++));
 		}
 		return ret;
-	}
-
-	// methods for reading an array: "Pascal" arrays start with a u16 count
-	u32array(count) {
-		const arr = [];
-		while (count--) {
-			arr.push(this.getUint32(this.p));
-			this.p+=4;
-		}
-		return arr;
-	}
-
-	u16array(count) {
-		const arr = [];
-		while (count--) {
-			arr.push(this.getUint16(this.p));
-			this.p+=2;
-		}
-		return arr;
-	}
-
-	i16array(count) {
-		const arr = [];
-		while (count--) {
-			arr.push(this.getInt16(this.p));
-			this.p+=2;
-		}
-		return arr;
-	}
-
-	u32pascalArray() {
-		const arr = [];
-		let count = this.getUint16(this.p);
-		this.p+=2;
-		while (count--) {
-			arr.push(this.getUint32(this.p));
-			this.p+=4;
-		}
-		return arr;
-	}
-
-	u16pascalArray() {
-		const arr = [];
-		let count = this.getUint16(this.p);
-		this.p+=2;
-		while (count--) {
-			arr.push(this.getUint16(this.p));
-			this.p+=2;
-		}
-		return arr;
-	}
-
-	i16pascalArray() {
-		const arr = [];
-		let count = this.getUint16(this.p);
-		this.p+=2;
-		while (count--) {
-			arr.push(this.getInt16(this.p));
-			this.p+=2;
-		}
-		return arr;
 	}
 
 	compare(condition) {
@@ -1951,7 +1922,7 @@ class SamsaBuffer extends DataView {
 		// simple glyph
 		else if (glyph.numberOfContours >= 0) { // note that the spec allows for numberOfContours to be 0, in which case we have a zero-contour glyph but with the possibility of instructions to move phantom points
 
-			glyph.endPts = this.u16array(glyph.numberOfContours); // end points of each contour
+			glyph.endPts = this.u16_arrayOfLength(glyph.numberOfContours); // end points of each contour
 			glyph.numPoints = glyph.endPts[glyph.numberOfContours -1] + 1;
 			this.seekr(glyph.instructionLength = this.u16); // skip over instructions
 
@@ -3660,7 +3631,7 @@ class SamsaBuffer extends DataView {
 			const tell = this.tell();
 			this.seek(featureListOffset + offset);
 			this.seekr(2); // ignore featureParamsOffset
-			feature.lookupIndices = this.u16pascalArray();
+			feature.lookupIndices = this.u16_pascalArray;
 			features.push(feature);
 			this.seek(tell);
 		}
@@ -3672,7 +3643,7 @@ class SamsaBuffer extends DataView {
 		const coverage = { format: this.u16 };
 		switch (coverage.format) {
 			case 1: {
-				coverage.glyphArray = this.u16pascalArray();
+				coverage.glyphArray = this.u16_pascalArray;
 				break;
 			}
 			case 2: {
@@ -4402,7 +4373,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 				// get conditions
 				if (conditionSetOffset) {
 					buf.seek(gsub.featureVariationsOffset + conditionSetOffset);
-					const conditionOffsets = buf.u32pascalArray();
+					const conditionOffsets = buf.u16_pascalArray;
 					conditionOffsets.forEach(offset => {
 						buf.seek(gsub.featureVariationsOffset + conditionSetOffset + offset);
 						const format = buf.u16;
@@ -4424,7 +4395,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 							const tell2 = buf.tell(); // init tell2
 							buf.seek(gsub.featureVariationsOffset + featureTableSubstitutionOffset + alternateFeatureOffset);
 							buf.seekr(2); // featureParams, always 0
-							substitution.lookups = buf.u16pascalArray();
+							substitution.lookups = buf.u16_pascalArray;
 							featureVariation.substitutions.push(substitution);
 							buf.seek(tell2); // return to tell2
 						}
@@ -4447,7 +4418,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 		const lookupOffset = buf.u16;
 		buf.seek(gsub.lookupListOffset + lookupOffset);
 		const lookup = { type: buf.u16, flag: buf.u16, subtables: [] };
-		const subtableOffsets = buf.u16pascalArray();
+		const subtableOffsets = buf.u16_pascalArray;
 		subtableOffsets.forEach(sto => {
 			const subtableOffset = gsub.lookupListOffset + lookupOffset + sto;
 			buf.seek(subtableOffset);
@@ -4463,7 +4434,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 							subtable.deltaGlyphID = buf.i16; // note i16
 						}
 						else if (subtable.format == 2) {
-							subtable.substituteGlyphIDs = buf.u16pascalArray();
+							subtable.substituteGlyphIDs = buf.u16_pascalArray;
 						}
 						break;
 					}
@@ -4472,10 +4443,10 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 					case 2: {
 						if (subtable.format == 1) {
 							subtable.sequences = [];
-							const sequenceOffsets = buf.u16pascalArray();
+							const sequenceOffsets = buf.u16_pascalArray;
 							sequenceOffsets.forEach(offset => {
 								buf.seek(subtableOffset + offset);
-								subtable.sequences.push(buf.u16pascalArray());
+								subtable.sequences.push(buf.u16_pascalArray);
 							});
 							break;
 						}
@@ -4486,10 +4457,10 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 					case 3: {
 						if (subtable.format == 1) {
 							subtable.alternateSets = [];
-							const alternateSetOffsets = buf.u16pascalArray();
+							const alternateSetOffsets = buf.u16_pascalArray;
 							alternateSetOffsets.forEach(offset => {
 								buf.seek(subtableOffset + offset);
-								subtable.alternateSets.push(buf.u16pascalArray());
+								subtable.alternateSets.push(buf.u16_pascalArray);
 							});
 						}
 						break;
@@ -4499,16 +4470,16 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 					case 4: {
 						if (subtable.format == 1) {
 							subtable.ligatureSets = []; // a ligature set is a set of ligatures that share the same first glyph (e.g. ffl, ff, fi, fl)
-							const ligSetOffsets = buf.u16pascalArray();
+							const ligSetOffsets = buf.u16_pascalArray;
 							ligSetOffsets.forEach(offset => {
 								buf.seek(subtableOffset + offset);
 								const ligSet = [];
-								const ligOffsets = buf.u16pascalArray();
+								const ligOffsets = buf.u16_pascalArray;
 								ligOffsets.forEach(offset2 => {
 									buf.seek(subtableOffset + offset + offset2);
 									ligSet.push({
 										ligatureGlyph: buf.u16,
-										componentGlyphIDs: buf.u16array(buf.u16 - 1), // -1 because componentCount includes the initial glyph
+										componentGlyphIDs: buf.u16_arrayOfLength(buf.u16 - 1), // -1 because componentCount includes the initial glyph
 									 });
 								});
 								subtable.ligatureSets.push(ligSet);
@@ -4672,14 +4643,14 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 		switch (classDef.classFormat) {
 			case 1: {
 				classDef.startGlyphID = buf.u16;
-				classDef.classValueArray = buf.u16pascalArray();
+				classDef.classValueArray = buf.u16_pascalArray;
 				break;
 			}
 			case 2: {
 				classDef.classRanges = [];
 				const classRangeCount = buf.u16;
 				for (let i=0; i<classRangeCount; i++) {
-					classDef.classRanges.push(buf.u16array(3)); // startGlyphID, endGlyphID, class (faster than making an object)
+					classDef.classRanges.push(buf.u16_arrayOfLength(3)); // startGlyphID, endGlyphID, class (faster than making an object)
 				}
 				break;
 			}
@@ -4760,7 +4731,7 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 
 					// PairPosFormat1: Pair Adjustment Positioning Format 1: Adjustments for Glyph Pairs
 					case 1: {
-						const pairSetOffsets = buf.u16pascalArray();
+						const pairSetOffsets = buf.u16_pascalArray;
 						subtable.pairSets = [];
 						pairSetOffsets.forEach(offset => {
 							buf.seek(subtable.offset + offset);
@@ -4880,7 +4851,7 @@ SamsaInstance.prototype.glyphLayoutGPOS = function (inputLayout, options={}) {
 		const lookupOffset = buf.u16;
 		buf.seek(gpos.lookupListOffset + lookupOffset);
 		let lookup = { type: buf.u16, flag: buf.u16, subtables: [] };
-		const subtableOffsets = buf.u16pascalArray();
+		const subtableOffsets = buf.u16_pascalArray;
 		subtableOffsets.forEach(subtableOffset => {
 			buf.seek(gpos.lookupListOffset + lookupOffset + subtableOffset);
 			lookup.subtables.push(decodeSubtable(lookup.type));
@@ -5872,25 +5843,27 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 				// always push the 2 shapes as defs
 				// defs.push(`<rect id="${src}" x="0" y="0" width="100" height="100" fill="#0000ff80"/>`); // src
 				// defs.push(`<rect id="${dest}" x="50" y="50" width="100" height="100" fill="#ff0000"/>`); // dest
+
+				// https://codepen.io/lorp/pen/wvRMEeY
 				
 				switch (modeType) {
 					
 					// https://developer.mozilla.org/en-US/docs/Web/SVG/Element/feComposite
 					case "F": {
-						defs[`filter-${m}`] = `<filter id="filter-${m}">
-							<feImage href="#${dest}" x="0px" y="0px" width="300px" height="300px" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" />
-							<feComposite in="SourceGraphic" operator="${mode}" />
-							</filter>`;
-						svg += `<g><use href="#${src}" style="filter:url(#filter-${m})" /></g>`;      
+						defs[`filter-${m}`] = `<filter id="filter-${m}">` +
+							`<feImage href="#${dest}" x="0px" y="0px" width="300px" height="300px" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" />` +
+							`<feComposite in="SourceGraphic" operator="${mode}" />` +
+							`</filter>`;
+						svg += `<g><use href="#${src}" style="filter:url(#filter-${m})" /></g>`;
 						break;
 					}
 					
 					// https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
 					case "M": {
-						svg += `<g style="isolation: isolate;">
-									<use href="#src" style="mix-blend-mode: ${mode};" />
-									<use href="#dest" style="mix-blend-mode: ${mode};" />
-								</g>`;
+						svg += `<g style="isolation: isolate;">` +
+									`<use href="#src" style="mix-blend-mode: ${mode};" />` +
+									`<use href="#dest" style="mix-blend-mode: ${mode};" />` +
+								`</g>`;
 						break;
 					}
 					
