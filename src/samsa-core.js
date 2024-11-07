@@ -1426,7 +1426,10 @@ class SamsaBuffer extends DataView {
 	}
 
 	set u32_array(arr) {
-		arr.forEach(num => { this.setUint32(this.p, num), this.p += 4 });
+		for (const num of arr) {
+			this.setUint32(this.p, num);
+			this.p += 4;
+		}
 	}
 
 	set i32(num) {
@@ -1435,7 +1438,10 @@ class SamsaBuffer extends DataView {
 	}
 
 	set i32_array(arr) {
-		arr.forEach(num => { this.setInt32(this.p, num), this.p += 4 });
+		for (const num of arr) {
+			this.setInt32(this.p, num);
+			this.p += 4;
+		}
 	}
 
 	get i32() {
@@ -1614,13 +1620,39 @@ class SamsaBuffer extends DataView {
 	}
 
 	set i16_array(arr) {
-		arr.forEach(num => { this.setInt16(this.p, num), this.p += 2 });
+		for (const num of arr) {
+			this.setInt16(this.p, num);
+			this.p += 2;
+		}
+	}
+
+	i16_arrayOfLength(count) { // we can’t use a getter as it needs an argument
+		const arr = [];
+		while (count--) {
+			arr.push(this.getInt16(this.p));
+			this.p+=2;
+		}
+		return arr;
 	}
 
 	set i16_pascalArray(arr) {
 		this.setUint16(this.p, arr.length);
 		this.p += 2;
-		arr.forEach(num => { this.setInt16(this.p, num), this.p += 2 });
+		for (const num of arr) {
+			this.setInt16(this.p, num);
+			this.p += 2;
+		}
+	}
+
+	get i16_pascalArray() {
+		const arr = [];
+		let count = this.getUint16(this.p);
+		this.p+=2;
+		while (count--) {
+			arr.push(this.getInt16(this.p));
+			this.p+=2;
+		}
+		return arr;
 	}
 
 	set f214(num) {
@@ -1629,13 +1661,19 @@ class SamsaBuffer extends DataView {
 	}
 
 	set f214_array(arr) {
-		arr.forEach(num => { this.setInt16(this.p, num * 0x4000), this.p += 2 });
+		for (const num of arr) {
+			this.setInt16(this.p, num * 0x4000);
+			this.p += 2;
+		}
 	}
 
 	set f214_pascalArray(arr) {
 		this.setUint16(this.p, arr.length);
 		this.p += 2;
-		arr.forEach(num => { this.setInt16(this.p, num * 0x4000), this.p += 2 });
+		for (const num of arr) {
+			this.setInt16(this.p, num * 0x4000);
+			this.p += 2;
+		}
 	}
 
 	get f214() {
@@ -1654,7 +1692,8 @@ class SamsaBuffer extends DataView {
 	}
 
 	set u8_array(arr) {
-		arr.forEach(num => this.setUint8(this.p++, num));
+		for (const num of arr)
+			this.setUint8(this.p++, num);
 	}
 
 	set i8(num) {
@@ -1662,7 +1701,8 @@ class SamsaBuffer extends DataView {
 	}
 
 	set i8_array(arr) {
-		arr.forEach(num => this.setInt8(this.p++, num));
+		for (const num of arr)
+			this.setInt8(this.p++, num);
 	}
 
 	get i8() {
@@ -3197,10 +3237,7 @@ class SamsaBuffer extends DataView {
 							bboxByte = bufs.bbox.u8; // only read a byte full of bits if we are at the start of that byte
 						const bboxIsEmbedded = bboxByte & bit;
 						if (bboxIsEmbedded) {
-							xMin = bufs.bboxValues.i16;
-							yMin = bufs.bboxValues.i16;
-							xMax = bufs.bboxValues.i16;
-							yMax = bufs.bboxValues.i16;
+							[xMin, yMin, xMax, yMax] = bufs.bboxValues.i16_arrayOfLength(4);
 						}
 		
 						// skip empty glyphs
@@ -3457,10 +3494,7 @@ class SamsaBuffer extends DataView {
 							// write bbox for simple and composite glyphs (works for embedded or calculated bbox)
 							const glyphEnd = outputBuf.tell();
 							outputBuf.seek(glyphStart+2);
-							outputBuf.i16 = xMin;
-							outputBuf.i16 = yMin;
-							outputBuf.i16 = xMax;
-							outputBuf.i16 = yMax;
+							outputBuf.i16_array = [xMin, yMin, xMax, yMax];
 							outputBuf.seek(glyphEnd);
 			
 							// pad glyph to 2 bytes (all glyphs need this)
