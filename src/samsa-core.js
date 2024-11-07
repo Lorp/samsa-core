@@ -145,7 +145,7 @@ const FORMATS = {
 		maxMemType1: U32,
 		_IF_: [["version", "==", 2.0], {
 			numGlyphs: U16,
-			glyphNameIndex: [U16, "_ARG0_"],
+			glyphNameIndex: [U16, "numGlyphs"],
 		}],
 		_IF_2: [["version", "==", 2.5], {
 			numGlyphs: U16,
@@ -665,7 +665,7 @@ const TABLE_DECODERS = {
 									bufE.seek(nonDefaultUVSOffset);
 									const count = bufE.u32;
 									for (let r=0; r<count; r++) {
-										nonDefaultUVS.push({ unicodeValue: bufE.u24, glyphID: bufE.u16 });
+										nonDefaultUVS.push({ unicodeValue: bufE.u24, glyphId: bufE.u16 });
 									}
 								}
 
@@ -697,8 +697,8 @@ const TABLE_DECODERS = {
 			if (colr.numBaseGlyphRecords) {
 				buf.seek(colr.baseGlyphRecordsOffset);
 				for (let i=0; i<colr.numBaseGlyphRecords; i++)  {
-					const glyphID = buf.u16;
-					colr.baseGlyphRecords[glyphID] = [buf.u16, buf.u16]; // firstLayerIndex, numLayers
+					const glyphId = buf.u16;
+					colr.baseGlyphRecords[glyphId] = [buf.u16, buf.u16]; // firstLayerIndex, numLayers
 				}
 			}
 
@@ -710,8 +710,8 @@ const TABLE_DECODERS = {
 					colr.numBaseGlyphPaintRecords = buf.u32;
 					colr.baseGlyphPaintRecords = [];
 					for (let i=0; i<colr.numBaseGlyphPaintRecords; i++)  {
-						const glyphID = buf.u16;
-						colr.baseGlyphPaintRecords[glyphID] = colr.baseGlyphListOffset + buf.u32;
+						const glyphId = buf.u16;
+						colr.baseGlyphPaintRecords[glyphId] = colr.baseGlyphListOffset + buf.u32;
 					}
 				}
 
@@ -901,6 +901,20 @@ const TABLE_DECODERS = {
 				font.names[record.nameID] = record.string; // only record 3, 1, 0x0409 for easy use
 			}
 		});
+	},
+
+	"post": (font, buf) => {
+		const post = font.post;
+		if (post.version === 2.0) {
+			// this avoids duplicating string data: we will use a function to retrieve the string from the buffer
+			post.pascalStringIndices = [];
+			buf.seek(32 + 2 + post.numGlyphs * 2);
+			while (buf.tell() < buf.byteLength) {
+				post.pascalStringIndices.push(buf.tell());
+				if (buf.tell() < buf.byteLength)
+					buf.seekr(buf.u8);
+			}
+		}
 	},
 
 	"vmtx": (font, buf) => {
@@ -1942,6 +1956,19 @@ class SamsaBuffer extends DataView {
 		// TODO: return bytelength? it may be different from str.length*2
 	}
 
+	decodeString(length) {
+		// 8-bit string
+		let str = "";
+		for (let i=0; i<length; i++) {
+			str += String.fromCharCode(this.u8);
+		}
+		return str;
+	}
+
+	decodePascalString() {
+		return this.decodeString(this.u8);
+	}
+
 	decodeGlyph(numBytes, options={}) {
 		
 		const metrics = options.metrics ?? [0, 0, 0, 0];
@@ -2063,10 +2090,6 @@ class SamsaBuffer extends DataView {
 		glyph.points[glyph.numPoints+1] = [metrics[1] ?? 0,               0, 0]; // H: Right side bearing point
 		glyph.points[glyph.numPoints+2] = [              0, metrics[2] ?? 0, 0]; // V: Top side bearing point
 		glyph.points[glyph.numPoints+3] = [              0, metrics[3] ?? 0, 0]; // V: Bottom side bearing point
-		// glyph.points[glyph.numPoints]   = [metrics[0] ? metrics[0] : 0,               0, 0]; // H: Left side bearing point
-		// glyph.points[glyph.numPoints+1] = [metrics[1] ? metrics[1] : 0,               0, 0]; // H: Right side bearing point
-		// glyph.points[glyph.numPoints+2] = [              0, metrics[2] ? metrics[2] : 0, 0]; // V: Top side bearing point
-		// glyph.points[glyph.numPoints+3] = [              0, metrics[3] ? metrics[3] : 0, 0]; // V: Bottom side bearing point
 	
 		return glyph;
 	}
@@ -2977,15 +3000,15 @@ class SamsaBuffer extends DataView {
 
 			case 10: { // PaintGlyph
 				const nextOffset = this.u24;
-				paint.glyphID = this.u16; // by assigning glyphid we get an actual shape to use
+				paint.glyphId = this.u16; // by assigning glyphid we get an actual shape to use
 				this.seek(paint.offset + nextOffset);
 				paint.children.push(this.decodePaint(context)); // recursive (but we should only get transforms, more Format 10 tables, and a fill from now on)
 				break;
 			}
 
 			case 11: { // PaintColrGlyph
-				const glyphID = this.u16;
-				this.seek(colr.baseGlyphPaintRecords[glyphID]);
+				const glyphId = this.u16;
+				this.seek(colr.baseGlyphPaintRecords[glyphId]);
 				paint.children.push(this.decodePaint(context)); // recursive
 				break;
 			}
@@ -3579,6 +3602,7 @@ class SamsaBuffer extends DataView {
 			options.tableDirectory = tableDirectory;
 
 		// return the SamsaBuffer as either a Uint8Array or a SamsaBuffer, depending on options
+		// TODO: truly release the unused memory, using TypedArray.set() to copy the required part to a new buffer (perhaps make it an option, so the caller can prioritize either speed or memory)
 		return options.Uint8Array ? new Uint8Array(outputBufU8.buffer, 0, finalLength)
 								  : new SamsaBuffer(outputBufU8.buffer, 0, finalLength);
 	}
@@ -3826,6 +3850,23 @@ SamsaFont.prototype.bufferFromTable = function (tag) {
 	return new SamsaBuffer(this.buf.buffer, this.tables[tag].offset, this.tables[tag].length);
 }
 
+SamsaFont.prototype.getGlyphName = function (glyphId) {
+	let name = null;
+	if (!this.post) {
+		return null;
+	}
+	if (this.post.version === 2.0) {
+		const index = this.post.glyphNameIndex[glyphId];
+		if (index < 258) {
+			name = SAMSAGLOBAL.stdGlyphNames[index];
+		}
+		else {
+			this.post.buffer.seek(this.post.pascalStringIndices[index - 258]);
+			name = this.post.buffer.decodePascalString();
+		}
+	}
+	return name;
+}
 
 // given an ivs and a tuple, returns a 2d array of values that need to be added to the items they apply to
 // - although delta values are always integers, interpolated deltas are in general floating point
@@ -4630,7 +4671,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 										}
 										if (d === seq.length) { // did we find a ligature?
 											// YES: mutate the run! Note that r does not need to be corrected: in "office", r=1 before the "ffi" ligature substitution, and r=1 (correctly) after the ligature substitution, so next glyph will be "c"
-											run.splice(r, seq.length+1, lig.ligatureGlyph); // splice the ligature glyphID into the array, replacing seq.length+1 items at position r (note that r is soon incremented by 1 as usual)
+											run.splice(r, seq.length+1, lig.ligatureGlyph); // splice the ligature glyphId into the array, replacing seq.length+1 items at position r (note that r is soon incremented by 1 as usual)
 											found = true;
 											break; // success: we can break out of the for loop // TODO: do we need to break out of the lookup subtables loop too?
 										}
@@ -5801,13 +5842,13 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 
 		case PAINT_SHAPE: {
 			// retrieve the glyph path definition if we don't already have it, and insert it into defs
-			if (!defs[`p${paint.glyphID}`]) {
-				const glyph = font.glyphs[paint.glyphID] || font.loadGlyphById(paint.glyphID);
+			if (!defs[`p${paint.glyphId}`]) {
+				const glyph = font.glyphs[paint.glyphId] || font.loadGlyphById(paint.glyphId);
 				const iglyph = glyph.instantiate(context.instance);
 				const path = iglyph.svgGlyphMonochrome(0);
-				defs[`p${paint.glyphID}`] = `<path id="p${paint.glyphID}" d="${path}"/>`;
+				defs[`p${paint.glyphId}`] = `<path id="p${paint.glyphId}" d="${path}"/>`;
 			}
-			context.lastGlyphId = paint.glyphID;
+			context.lastGlyphId = paint.glyphId;
 			svg += this.paintSVG(paint.children[0], context); // there’s only one child; this should be a fill or a gradient (or maybe another PAINT_SHAPE)
 			break;
 		}
