@@ -3572,10 +3572,6 @@ class SamsaBuffer extends DataView {
 			.sort((a,b) => compareString(a.tag, b.tag)) // sort by tag
 			.forEach(table => outputBuf.u32_array = this.tableDirectoryEntry(table)); // write 4 U32s for the table directory entry
 
-		// write final file
-		const finalBufferU8 = new Uint8Array(outputBufU8.buffer, 0, finalLength);
-		const finalBuffer = new SamsaBuffer(outputBufU8.buffer, 0, finalLength);
-
 		// return the tables, if requested
 		if (options.tables !== undefined)
 			options.tables = tables;
@@ -3583,7 +3579,8 @@ class SamsaBuffer extends DataView {
 			options.tableDirectory = tableDirectory;
 
 		// return the SamsaBuffer as either a Uint8Array or a SamsaBuffer, depending on options
-		return options.Uint8Array ? finalBufferU8 : finalBuffer;
+		return options.Uint8Array ? new Uint8Array(outputBufU8.buffer, 0, finalLength)
+								  : new SamsaBuffer(outputBufU8.buffer, 0, finalLength);
 	}
 
 	// decode header of GSUB and GPOS table
