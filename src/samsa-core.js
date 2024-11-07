@@ -3567,10 +3567,10 @@ class SamsaBuffer extends DataView {
 		outputBuf.seek(0);
 		outputBuf.u32 = header.flavor;
 		outputBuf.u16 = tables.length;
-		outputBuf.seek(12); // skip binary search params
+		outputBuf.u16_array = SamsaFont.prototype.binarySearchParams(tables.length); // write 3 U16s for the binary search params
 		tables
 			.sort((a,b) => compareString(a.tag, b.tag)) // sort by tag
-			.forEach(table => outputBuf.u32_array = this.tableDirectoryEntry(table)); // write the 4 U32s of the table directory entry
+			.forEach(table => outputBuf.u32_array = this.tableDirectoryEntry(table)); // write 4 U32s for the table directory entry
 
 		// write final file
 		const finalBufferU8 = new Uint8Array(outputBufU8.buffer, 0, finalLength);
