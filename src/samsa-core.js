@@ -2901,11 +2901,10 @@ class SamsaBuffer extends DataView {
 
 	decodePaint(context = {}) {
 
-		// function definitions for readOperands(), addVariations(), and decodeColorLine() are arrow-style to keep "this" in scope
-
 		// readOperands()
-		// - this reads all the variable operands for a paint (we also use this for non-variable versions of the same paint)
+		// - this reads all the operands for a paint
 		// - we look up the number of operands needed in PAINT_VAR_OPERANDS, so we can use the same function for all paint formats
+		// - the arrow function keeps "this" (the buffer) in scope
 		const readOperands = (type) => {
 			const count = PAINT_VAR_OPERANDS[paint.format];
 			for (let i=0; i<count; i++)
@@ -2913,7 +2912,7 @@ class SamsaBuffer extends DataView {
 		};
 		
 		// addVariations()
-		// - adds the variation deltas to the operands
+		// - adds the scaled variation deltas to the operands
 		// - the arrow function keeps "this" (the buffer) in scope
 		const addVariations = (operands) => {
 			if (paint.format % 2 === 0) // only odd-numbered paint formats have variations; we need operands
@@ -2932,7 +2931,7 @@ class SamsaBuffer extends DataView {
 		};
 
 		// we decode colorLine here, rather than as a method of SamsaBuffer, in order to keep paint in scope and to be able to use addVariations()
-		// - unlike other decodeX methods, it sets the data pointer according to the supplied argument, then restores it
+		// - the arrow function keeps "this" (the buffer) in scope
 		const decodeColorLine = () => {
 			const colorLine = {
 				extend: this.u8, // one of EXTEND_PAD (0), EXTEND_REPEAT (1), EXTEND_REFLECT (2)
