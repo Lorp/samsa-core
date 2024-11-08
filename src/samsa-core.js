@@ -29,7 +29,7 @@ const SAMSAGLOBAL = {
 	littleendian: endianness("LE"),
 	bigendian: endianness("BE"),
 	fingerprints: { WOFF2: 0x774f4632, TTF: 0x00010000, OTF: 0x4f54544f, true: 0x74727565 }, // 0x4f54544f/"OTTO" is for CFF fonts, 0x74727565/"true" is for Skia.ttf
-	stdGlyphNames: [".notdef",".null","nonmarkingreturn","space","exclam","quotedbl","numbersign","dollar","percent","ampersand","quotesingle","parenleft","parenright","asterisk","plus","comma","hyphen","period","slash","zero","one","two","three","four","five","six","seven","eight","nine","colon","semicolon","less","equal","greater","question","at","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","bracketleft","backslash","bracketright","asciicircum","underscore","grave","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","braceleft","bar","braceright","asciitilde","Adieresis","Aring","Ccedilla","Eacute","Ntilde","Odieresis","Udieresis","aacute","agrave","acircumflex","adieresis","atilde","aring","ccedilla","eacute","egrave","ecircumflex","edieresis","iacute","igrave","icircumflex","idieresis","ntilde","oacute","ograve","ocircumflex","odieresis","otilde","uacute","ugrave","ucircumflex","udieresis","dagger","degree","cent","sterling","section","bullet","paragraph","germandbls","registered","copyright","trademark","acute","dieresis","notequal","AE","Oslash","infinity","plusminus","lessequal","greaterequal","yen","mu","partialdiff","summation","product","pi","integral","ordfeminine","ordmasculine","Omega","ae","oslash","questiondown","exclamdown","logicalnot","radical","florin","approxequal","Delta","guillemotleft","guillemotright","ellipsis","nonbreakingspace","Agrave","Atilde","Otilde","OE","oe","endash","emdash","quotedblleft","quotedblright","quoteleft","quoteright","divide","lozenge","ydieresis","Ydieresis","fraction","currency","guilsinglleft","guilsinglright","fi","fl","daggerdbl","periodcentered","quotesinglbase","quotedblbase","perthousand","Acircumflex","Ecircumflex","Aacute","Edieresis","Egrave","Iacute","Icircumflex","Idieresis","Igrave","Oacute","Ocircumflex","apple","Ograve","Uacute","Ucircumflex","Ugrave","dotlessi","circumflex","tilde","macron","breve","dotaccent","ring","cedilla","hungarumlaut","ogonek","caron","Lslash","lslash","Scaron","scaron","Zcaron","zcaron","brokenbar","Eth","eth","Yacute","yacute","Thorn","thorn","minus","multiply","onesuperior","twosuperior","threesuperior","onehalf","onequarter","threequarters","franc","Gbreve","gbreve","Idotaccent","Scedilla","scedilla","Cacute","cacute","Ccaron","ccaron","dcroat"],
+	stdGlyphNames: [".notdef",".null","nonmarkingreturn","space","exclam","quotedbl","numbersign","dollar","percent","ampersand","quotesingle","parenleft","parenright","asterisk","plus","comma","hyphen","period","slash","zero","one","two","three","four","five","six","seven","eight","nine","colon","semicolon","less","equal","greater","question","at","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","bracketleft","backslash","bracketright","asciicircum","underscore","grave","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","braceleft","bar","braceright","asciitilde","Adieresis","Aring","Ccedilla","Eacute","Ntilde","Odieresis","Udieresis","aacute","agrave","acircumflex","adieresis","atilde","aring","ccedilla","eacute","egrave","ecircumflex","edieresis","iacute","igrave","icircumflex","idieresis","ntilde","oacute","ograve","ocircumflex","odieresis","otilde","uacute","ugrave","ucircumflex","udieresis","dagger","degree","cent","sterling","section","bullet","paragraph","germandbls","registered","copyright","trademark","acute","dieresis","notequal","AE","Oslash","infinity","plusminus","lessequal","greaterequal","yen","mu","partialdiff","summation","product","pi","integral","ordfeminine","ordmasculine","Omega","ae","oslash","questiondown","exclamdown","logicalnot","radical","florin","approxequal","Delta","guillemotleft","guillemotright","ellipsis","nonbreakingspace","Agrave","Atilde","Otilde","OE","oe","endash","emdash","quotedblleft","quotedblright","quoteleft","quoteright","divide","lozenge","ydieresis","Ydieresis","fraction","currency","guilsinglleft","guilsinglright","fi","fl","daggerdbl","periodcentered","quotesinglbase","quotedblbase","perthousand","Acircumflex","Ecircumflex","Aacute","Edieresis","Egrave","Iacute","Icircumflex","Idieresis","Igrave","Oacute","Ocircumflex","apple","Ograve","Uacute","Ucircumflex","Ugrave","dotlessi","circumflex","tilde","macron","breve","dotaccent","ring","cedilla","hungarumlaut","ogonek","caron","Lslash","lslash","Scaron","scaron","Zcaron","zcaron","brokenbar","Eth","eth","Yacute","yacute","Thorn","thorn","minus","multiply","onesuperior","twosuperior","threesuperior","onehalf","onequarter","threequarters","franc","Gbreve","gbreve","Idotaccent","Scedilla","scedilla","Cacute","cacute","Ccaron","ccaron","dcroat"], // 258 standard glyph names
 };
 
 // format codes
@@ -2780,28 +2780,54 @@ class SamsaBuffer extends DataView {
 			const _tupleCount = this.u16;
 			const tupleCount = _tupleCount & 0x0FFF;
 			const offsetToSerializedData = this.u16;
+			const bufS = new SamsaBuffer(this.buffer, tvtStart + offsetToSerializedData);
+			const sharedPointIds = _tupleCount & GVAR_SHARED_POINT_NUMBERS ? bufS.decodePointIds() : undefined; // get the shared pointIds
 
 			// create all the tuples
 			for (let t=0; t < tupleCount; t++) {
+				this.seekr(2); // serializedDataSize (we assume serializedData is packed, so we don’t use this)
+				const flags = this.u16; // tupleIndex in the spec
+				const tupleIndex = flags & 0x0FFF;
 				const tvt = {
-					serializedDataSize: this.u16,
-					flags: this.u16, // tupleIndex in the spec
 					numPoints: 0,
 					sharedTupleId: -1,
 					peak: [],
 					start: [],
 					end: [],
+					tents: [],
 				};
 
-				// move to a region representation, rather than peak, start, end arrays
-				// either 
-				// region = [[p0,p1,p2,p3],[s0,s1,s2,s3],[e0,e1,e2,e3]]; // fewer objects in general
+				// TODO: move to a "region of tents" all-integer representation, rather than peak, start, end arrays
+				// either (for a 4-axis font):
+				// region = [[p0,p1,p2,p3],[s0,s1,s2,s3],[e0,e1,e2,e3]]; // fewer objects in general and maybe quicker to read
 				// or
-				// region = [[p0,s0,e0],[p1,s1,e1],[p2,s2,e2],[p3,s3,e3]]; // more intuitive, and usually axisCount is max 3 or 4
+				// region = [[p0,s0,e0],[p1,s1,e1],[p2,s2,e2],[p3,s3,e3]]; // more intuitive, and usually axisCount is max 3 or 4... each subarray is a "tent"
 				// also consider a single Int16Array
+				// use a switch on (tvt.flags & GVAR_EMBEDDED_PEAK_TUPLE & GVAR_INTERMEDIATE_REGION)
 
-				const tupleIndex = tvt.flags & 0x0FFF;
-				if (tvt.flags & GVAR_EMBEDDED_PEAK_TUPLE) {
+				/*
+				const tell = this.tell();
+				for (let a=0; a<axisCount; a++) {
+					const peak = (flags & GVAR_EMBEDDED_PEAK_TUPLE) ? gvar.sharedTuples[tupleIndex][a] : this.f214;
+					tvt.tents.push(peak > 0 ? [peak, 0, 1] : [peak, -1, 0]);
+				}
+				if (flags & GVAR_INTERMEDIATE_REGION) {
+					for (let a=0; a<axisCount; a++) {
+						tvt.tents[a][1] = this.f214; // start
+					}
+					for (let a=0; a<axisCount; a++) {
+						tvt.tents[a][2] = this.f214; // end
+					}
+				}
+				for (const tent of tvt.tents) {
+					if (!isValidTent(tent))
+						tent[0] = tent[1] = tent[2] = 0;
+				}			
+				this.seek(tell);
+				console.log(tvt.tents);
+				*/
+				
+				if (flags & GVAR_EMBEDDED_PEAK_TUPLE) {
 					for (let a=0; a<axisCount; a++) {
 						tvt.peak[a] = this.f214;
 					}
@@ -2811,7 +2837,7 @@ class SamsaBuffer extends DataView {
 					tvt.peak = gvar.sharedTuples[tupleIndex]; // set the whole peak array at once, TODO: it would be better if we thought in terms of regions, and assigned complete shared regions
 				}
 
-				if (tvt.flags & GVAR_INTERMEDIATE_REGION) {
+				if (flags & GVAR_INTERMEDIATE_REGION) {
 					for (let a=0; a<axisCount; a++) {
 						tvt.start[a] = this.f214;
 					}
@@ -2841,27 +2867,17 @@ class SamsaBuffer extends DataView {
 							tvt.start[a] = tvt.end[a] = tvt.peak[a] = 0;
 					}
 				}
-				
-				tvts.push(tvt); // store the tvt
-			}
 
-			// is our position ok?
-			console.assert(this.tell() == tvtStart + offsetToSerializedData, "decodeTvts(): current offset is not ok (this.tell() != tvtStart + offsetToSerializedData)", this.tell(), tvtStart + offsetToSerializedData);
-
-			// get pointIds and deltas from the serialized data
-			this.seek(tvtStart + offsetToSerializedData); // jump to the serialized data explicitly		
-			const sharedPointIds = _tupleCount & GVAR_SHARED_POINT_NUMBERS ? this.decodePointIds() : undefined; // get the shared pointIds
-			for (let t=0; t < tupleCount; t++) { // go thru each tuple
-				const tvt = tvts[t];
-				const pointIds = tvt.flags & GVAR_PRIVATE_POINT_NUMBERS ? this.decodePointIds() : sharedPointIds; // use private point ids or use the shared point ids
-				tvt.allPoints = pointIds.length == 0; // flag special case if all points are used, this triggers IUP!
+				// get pointIds and deltas from the serialized data
+				const pointIds = flags & GVAR_PRIVATE_POINT_NUMBERS ? bufS.decodePointIds() : sharedPointIds; // use private point ids or use the shared point ids
+				tvt.allPoints = pointIds.length == 0; // flag special case if all points are used (when unset this triggers IUP!)
 				const tupleNumPoints = tvt.allPoints ? glyph.points.length : pointIds.length; // how many deltas do we need?
-				const xDeltas = this.decodeDeltas(tupleNumPoints);
-				const yDeltas = this.decodeDeltas(tupleNumPoints);
+				const xDeltas = bufS.decodeDeltas(tupleNumPoints);
+				const yDeltas = bufS.decodeDeltas(tupleNumPoints);
 				tvt.deltas = [];
 				if (tvt.allPoints) {
 					for (let pt=0; pt < glyph.points.length; pt++) {
-						tvt.deltas[pt] = [xDeltas[pt], yDeltas[pt]];
+						tvt.deltas[pt] = [xDeltas[pt], yDeltas[pt]]; // TODO: try replacing this with tvt.deltas = [xDeltas, yDeltas] so there’s no copying, and having an extra array for IUP to map pointIds in array indices
 					}
 				}
 				else {
@@ -2876,6 +2892,8 @@ class SamsaBuffer extends DataView {
 					}
 					// after this, we no longer need pointIds, right? so it needn’t stick around as a property of the tvt (except for visualization)
 				}
+
+				tvts.push(tvt); // store the tvt
 			}
 		}
 		return tvts;
