@@ -2916,11 +2916,10 @@ class SamsaBuffer extends DataView {
 		// - adds the variation deltas to the operands
 		// - the arrow function keeps "this" (the buffer) in scope
 		const addVariations = (operands) => {
-			const variationsEnabled = true;
-			if (!variationsEnabled || paint.format % 2 == 0 || operands.length == 0) // variations enabled; only odd-numbered paint formats have variations; we need operands
+			if (paint.format % 2 === 0) // only odd-numbered paint formats have variations; we need operands
 				return;
 			const varIndexBase = this.u32; // we must read this even if we don’t have an instance, otherwise reading gets out of sync
-			if (varIndexBase == 0xffffffff || !context.instance) // no variations for this paint; we need an instance
+			if (operands.length === 0 || varIndexBase === 0xffffffff || !context.instance) // we need operands; no variations for this paint; we need an instance
 				return;
 			const deltas = context.instance.deltaSets["COLR"];
 			for (let i=0; i<operands.length; i++) {
