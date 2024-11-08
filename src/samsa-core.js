@@ -2901,6 +2901,8 @@ class SamsaBuffer extends DataView {
 
 	decodePaint(context = {}) {
 
+		// function definitions for readOperands(), addVariations(), and decodeColorLine() are arrow-style to keep "this" in scope
+
 		// readOperands()
 		// - this reads all the variable operands for a paint (we also use this for non-variable versions of the same paint)
 		// - we look up the number of operands needed in PAINT_VAR_OPERANDS, so we can use the same function for all paint formats
@@ -2932,16 +2934,14 @@ class SamsaBuffer extends DataView {
 
 		// we decode colorLine here, rather than as a method of SamsaBuffer, in order to keep paint in scope and to be able to use addVariations()
 		// - unlike other decodeX methods, it sets the data pointer according to the supplied argument, then restores it
-		const decodeColorLine = (colorLineOffset) => {
-			const tell = this.tell();
-			this.seek(paint.offset + colorLineOffset);
+		const decodeColorLine = () => {
 			const colorLine = {
 				extend: this.u8, // one of EXTEND_PAD (0), EXTEND_REPEAT (1), EXTEND_REFLECT (2)
-				numStops: this.u16,
 				colorStops: [],
 			};
+			const numStops = this.u16;
 			const operands = [];
-			for (let cst=0; cst<colorLine.numStops; cst++) {
+			for (let cst=0; cst<numStops; cst++) {
 				const colorStop = {};
 				operands[0] = this.i16; // stopOffset
 				colorStop.paletteIndex = this.u16;
@@ -2951,7 +2951,6 @@ class SamsaBuffer extends DataView {
 				colorStop.alpha = operands[1] / 16384;
 				colorLine.colorStops.push(colorStop);
 			}
-			this.seek(tell); // restore the data pointer
 			return colorLine;
 		};
 
@@ -2962,7 +2961,6 @@ class SamsaBuffer extends DataView {
 			children: [],
 		};
 		const operands = [];
-		let tell;
 
 		// keep track of paintIds we have used, to avoid infinite recursion
 		// - we use an Array (not a Set or anything non-LIFO), since we need to push and pop at the beginning of each decodePaint()
@@ -2998,7 +2996,10 @@ class SamsaBuffer extends DataView {
 
 			case 4: case 5: case 6: case 7: case 8: case 9: { // all gradient paints
 				const colorLineOffset = this.u24;
-				paint.colorLine = decodeColorLine(colorLineOffset);
+				const tell = this.tell();
+				this.seek(paint.offset + colorLineOffset);
+				paint.colorLine = decodeColorLine();
+				this.seek(tell); // restore the data pointer
 				readOperands(I16);
 				addVariations(operands);
 				if (paint.format < 6) { // PaintLinearGradient, PaintVarLinearGradient
@@ -3034,7 +3035,7 @@ class SamsaBuffer extends DataView {
 			case 12: case 13: { // PaintTransform, PaintVarTransform
 				const nextOffset = this.u24;
 				const transformOffset = this.u24;
-				tell = this.tell();
+				const tell = this.tell();
 				this.seek(paint.offset + transformOffset);
 				readOperands(I32);
 				addVariations(operands);
@@ -6009,7 +6010,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 						// get the colorLine stops for all gradient types
 						let stops = "";
 						let gradientElement;
-						paint.colorLine.colorStops.forEach(colorStop => {
+						for (const colorStop of paint.colorLine.colorStops) {
 							const color = colorStop.paletteIndex == 0xffff ? context.color : palette.colors[colorStop.paletteIndex];
 							const attrs = {
 								offset: `${colorStop.stopOffset*100}%`,
@@ -6018,7 +6019,7 @@ SamsaGlyph.prototype.paintSVG = function (paint, context) {
 							if (colorStop.alpha != 1)
 								attrs["stop-opacity"] = colorStop.alpha;
 							stops += `<stop${expandAttrs(attrs)}/>`;
-						});
+						};
 
 						switch (paintFormatStatic) {
 
