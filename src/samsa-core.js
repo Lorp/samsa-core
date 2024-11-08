@@ -3037,8 +3037,8 @@ class SamsaBuffer extends DataView {
 				tell = this.tell();
 				this.seek(paint.offset + transformOffset);
 				readOperands(I32);
-				this.seek(tell);
 				addVariations(operands);
+				this.seek(tell);
 				paint.matrix = [ operands[0]/0x10000, operands[1]/0x10000, operands[2]/0x10000, operands[3]/0x10000, operands[4]/0x10000, operands[5]/0x10000 ];
 				this.seek(paint.offset + nextOffset);
 				paint.children.push(this.decodePaint(context)); // recursive
