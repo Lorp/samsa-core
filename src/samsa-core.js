@@ -2771,7 +2771,7 @@ class SamsaBuffer extends DataView {
 
 		// do we have tvt data?
 		if (nextOffset - offset > 0) {
-	
+
 			// jump to the tvt data, record the offset
 			this.seek(gvar.glyphVariationDataArrayOffset + offset);
 			const tvtStart = this.tell();
@@ -2780,8 +2780,8 @@ class SamsaBuffer extends DataView {
 			const _tupleCount = this.u16;
 			const tupleCount = _tupleCount & 0x0FFF;
 			const offsetToSerializedData = this.u16;
-			const bufS = new SamsaBuffer(this.buffer, tvtStart + offsetToSerializedData);
-			const sharedPointIds = _tupleCount & GVAR_SHARED_POINT_NUMBERS ? bufS.decodePointIds() : undefined; // get the shared pointIds
+			const bufS = new SamsaBuffer(this.buffer, this.byteOffset + tvtStart + offsetToSerializedData);
+			const sharedPointIds = _tupleCount & GVAR_SHARED_POINT_NUMBERS ? bufS.decodePointIds() : null; // get the shared pointIds
 
 			// create all the tuples
 			for (let t=0; t < tupleCount; t++) {
@@ -2869,8 +2869,8 @@ class SamsaBuffer extends DataView {
 				}
 
 				// get pointIds and deltas from the serialized data
-				const pointIds = flags & GVAR_PRIVATE_POINT_NUMBERS ? bufS.decodePointIds() : sharedPointIds; // use private point ids or use the shared point ids
-				tvt.allPoints = pointIds.length == 0; // flag special case if all points are used (when unset this triggers IUP!)
+				const pointIds = flags & GVAR_PRIVATE_POINT_NUMBERS ? bufS.decodePointIds() : sharedPointIds; // use private point ids or use the shared point ids				
+				tvt.allPoints = pointIds.length === 0; // flag special case if all points are used (when unset this triggers IUP!)
 				const tupleNumPoints = tvt.allPoints ? glyph.points.length : pointIds.length; // how many deltas do we need?
 				const xDeltas = bufS.decodeDeltas(tupleNumPoints);
 				const yDeltas = bufS.decodeDeltas(tupleNumPoints);
