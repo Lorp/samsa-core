@@ -6,6 +6,7 @@ Features:
 * variations
 * avar1 and avar2
 * COLRv0 and COLRv1
+* static TrueType export
 * SVG generation
 * shaping:
   * GSUB (includes basic ligatures and Emoji)
