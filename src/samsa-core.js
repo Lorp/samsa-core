@@ -2639,9 +2639,9 @@ class SamsaBuffer extends DataView {
 
 	// encodeInstance is how we export a static font!
 	encodeInstance(instance, options={format: "truetype"}) {
-		// options.format: "truetype" | "cff2";
+		// options.format: "truetype" | "cff2"
+		// options.checkSums: true | false
 		// TODO: instantiate MVAR, cvar, GSUB etc.
-		// TODO: checksums
 
 		const startTime = performance.now();
 		const font = instance.font;
@@ -2712,7 +2712,6 @@ class SamsaBuffer extends DataView {
 
 		// table checkSums
 		if (options.checkSums) {
-			const checksums = {};
 			for (const table of tables) {
 				checkSumTotal += table.checkSum = this.checkSum(table.offset, table.length);
 				checkSumTotal &= 0xffffffff;
