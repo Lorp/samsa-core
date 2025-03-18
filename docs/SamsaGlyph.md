@@ -1,3 +1,5 @@
+[_Samsa docs_](index.md)
+
 ## SamsaGlyph object
 
 ### Description
