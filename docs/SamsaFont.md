@@ -4,7 +4,7 @@
 
 ### Description
 
-The `SamsaFont` object is the fundamental object in the Samsa Core library. It is created from a binary TrueType font stored in a `SamsaBuffer`. Note that `SamsaBuffer` is a subclass of the standard JavaScript `DataView`. The `SamsaFont` object is used to create `SamsaInstance` objects, which are then used to render text using the `SamsaInstance.renderText()` method.
+The `SamsaFont` object is the fundamental object in the Samsa Core library. It is created from a binary TrueType font stored in a [`SamsaBuffer`](SamsaBuffer.md). Note that `SamsaBuffer` is a subclass of the standard JavaScript [`DataView`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView). The `SamsaFont` object is used to create [`SamsaInstance`](SamsaInstance.md) objects, which are then used to render text using the `SamsaInstance.renderText()` method.
 
 ### Constructor
 
