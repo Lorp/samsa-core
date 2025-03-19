@@ -14,10 +14,22 @@ The `SamsaFont` object is the fundamental object in the Samsa Core library. It i
 
 ### Instance methods
 
+const glyphId = font.glyphIdFromUnicode(string.codePointAt(0));
+const glyph = font.loadGlyphById(glyphId);
+
+
+* `SamsaFont.glyphIdFromUnicode()`  
+Takes an integer argument that is the Unicode code point of a character, and returns the id of the glyph that, by default, represents the character. If the font does not contain a glyph for the character, return value is 0.
+
+* `SamsaFont.loadGlyphById()`  
+Takes an integer argument that is the id of the glyph to be loaded, and returns a new `SamsaGlyph` object. The returned `SamsaGlyph` may be simple or composite; if composite, it may be converted to a simple glyph using `SamsaGlyph.decompose()`. It is valid to load glyph 0, which, according to the TrueType specification, represents the missing glyph and is typically an empty square or a square with a cross inside it. Note that this method only returns default form of the glyph. For variations, it is necessary to  `SamsaInstance` object. Clients should keep track of those glyphs they have already loaded, thus not load the same glyph multiple times.
+
 ### Examples
 
+The essential steps are to obtain a `SamsaBuffer` that contains a TrueType font, and make a `SamsaFont` from it.
+
 ```javascript
-const buf = new SamsaBuffer(arrayBuffer);
+const buf = new SamsaBuffer(arrayBuffer); // arrayBuffer contains a TrueType font
 const font = new SamsaFont(buf);
 ```
 
