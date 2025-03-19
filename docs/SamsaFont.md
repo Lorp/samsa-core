@@ -14,10 +14,6 @@ The `SamsaFont` object is the fundamental object in the Samsa Core library. It i
 
 ### Instance methods
 
-const glyphId = font.glyphIdFromUnicode(string.codePointAt(0));
-const glyph = font.loadGlyphById(glyphId);
-
-
 * `SamsaFont.glyphIdFromUnicode()`  
 Takes an integer argument that is the Unicode code point of a character, and returns the id of the glyph that, by default, represents the character. If the font does not contain a glyph for the character, return value is 0.
 

@@ -22,6 +22,8 @@ Array of indices into the `points` array that indicate the last point of each co
 The `SamsaFont` object that the glyph belongs to.
 * `SamsaGlyph.instructionLength`  
 The number of bytes in the glyph’s instructions.
+* `SamsaGlyph.instructions`  
+If `SamsaGlyph.instructionLength` is non-zero, this is a `SamsaBuffer` object containing the instruction bytes for the glyph; otherwise it is `undefined`.
 * `SamsaGlyph.name`  
 The name of the glyph (often not used).
 * `SamsaGlyph.numberOfContours`  
@@ -38,14 +40,13 @@ Array of tuple variation tables, which are used in variations.
 Returns a new `SamsaGlyph` object that is a simple glyph, by recursively decomposing the composite glyph. The new glyph is visually identical to the original glyph. The `components` array of the returned glyph is empty. It is valid to call this method on a simple glyph, in which case the method returns a new glyph that is a copy of the original.
 * `SamsaGlyph.instantiate()`  
 Returns a new `SamsaGlyph` object, being a new version of this glyph transformed according to the `SamsaInstance` object passed as an argument.
-* `SamsaGlyph.instructions()`  
-Returns a new `SamsaBuffer` object containing the instruction bytes for the glyph. No new memory is allocated, because the buffer points to existing memory. If the glyph has no instructions, the result is undefined.
 * `SamsaGlyph.svgPath()`  
 Returns a path string representing the glyph, suitable for use as the [`d`](https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/d) attribute of an SVG [`<path>`](https://developer.mozilla.org/en-US/docs/Web/SVG/Element/path) element.
 
 ### Examples
 
 ```javascript
+// display the array of points for the glyph for the character "A"
 const nodeBuffer = fs.readFileSync(filename);
 const arrayBuffer = nodeBuffer.buffer;
 const samsaBuffer = new SamsaBuffer(arrayBuffer);
