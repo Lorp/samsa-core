@@ -1,6 +1,6 @@
 {
   "name": "samsa-core",
-  "version": "2.0.11",
+  "version": "2.0.13",
   "main": "index.js",
   "author": "Laurence Penney <lorp@lorp.org>",
   "license": "Apache-2.0",
