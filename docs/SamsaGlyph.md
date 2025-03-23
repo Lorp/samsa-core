@@ -37,7 +37,7 @@ Array of tuple variation tables (TVTs), which are used in variations. Each TVT s
 
 ### Instance methods
 * `SamsaGlyph.decompose()`  
-Returns a new `SamsaGlyph` object that is a simple glyph, by recursively decomposing the composite glyph. The new glyph is visually identical to the original glyph. The `components` array of the returned glyph is empty. It is valid to call this method on a simple glyph, in which case the method returns a new glyph that is a copy of the original.
+Returns a new `SamsaGlyph` object that is a simple glyph, by recursively decomposing the glyph if it is composite. The new glyph is visually identical to the original glyph. The `components` array of the returned glyph will be empty. It is valid to call this method on a simple glyph, in which case the method returns a new glyph that is a copy of the original.
 * `SamsaGlyph.instantiate()`  
 Returns a new `SamsaGlyph` object, being a new version of this glyph transformed according to the `SamsaInstance` object passed as an argument.
 * `SamsaGlyph.svgPath()`  
