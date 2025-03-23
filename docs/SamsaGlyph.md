@@ -31,7 +31,7 @@ The number of contours in the glyph.
 * `SamsaGlyph.numPoints`  
 The number of points in the glyph. It excludes the 4 phantom points.
 * `SamsaGlyph.points`  
-Array of points (each point is an array of integers of the form `[x, y, onCurve]`, where `onCurve` is 0 for off-curve points and 1 for on-curve points). Note that the length of this array is 4 more than `SamsaGlyph.numPoints`, because 4 [phantom points](https://learn.microsoft.com/en-us/typography/opentype/spec/tt_instructing_glyphs#phantom-points) are appended at the end.
+Array of points (each point is an array of integers of the form `[x, y, onCurve]`, where `onCurve` is 0 for off-curve points and 1 for on-curve points). Note that the length of this array is 4 more than `SamsaGlyph.numPoints`, because 4 [phantom points](https://learn.microsoft.com/en-us/typography/opentype/spec/tt_instructing_glyphs#phantom-points) are appended.
 * `SamsaGlyph.tvts`  
 Array of tuple variation tables (TVTs), which are used in variations. Each TVT specifies a ‘region’ in a variable font’s designspace in which variation is to be applied, and a set of ‘deltas’, where each delta is a vector representing the maximum displacement of a point in _x_ and _y_.
 

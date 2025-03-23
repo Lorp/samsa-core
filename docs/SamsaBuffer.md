@@ -8,7 +8,7 @@ The `SamsaBuffer` object is a subclass of the standard JavaScript [`DataView`](h
 
 
 #### Note
-For highly optimized operations, it may be better to use a [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) view onto the underlying buffer of the `SamsaBuffer`. In this case, the client must handle the pointer during the optimized operation and update the pointer of the `SamsaBuffer` afterwards. But be careful of using similar multi-byte arrays such as [`Uint16Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array) and [`Uint32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array): their byte order is “in the platform byte order”, which with x86 and Apple M-series chips is little-endian, unlike TrueType which is big-endian throughout.
+For highly optimized operations, it may be better to use a [`Uint8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) view onto the underlying buffer of the `SamsaBuffer`. In this case, the client must handle the pointer during the optimized operation and update the pointer of the `SamsaBuffer` afterwards. But be careful of using similar multi-byte arrays such as [`Uint16Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array) and [`Uint32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array): their byte order is “in the platform byte order”, which for x86 and Apple M-series is little-endian, unlike TrueType which is big-endian throughout.
 
 ### Constructor
 
