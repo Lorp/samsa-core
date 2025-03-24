@@ -19,8 +19,8 @@ For highly optimized operations, it may be better to use a [`Uint8Array`](https:
 * `SamsaBuffer.buffer`  
 The underlying `ArrayBuffer` which stores the data of the `SamsaBuffer`.
 
-* `SamsaBuffer.offset`  
-The offset from the start of the underlying `ArrayBuffer` to the start of the `SamsaBuffer`. Note that `SamsaBuffer.offset` + `SamsaBuffer.byteOffset` is always <= `SamsaBuffer.buffer.byteLength`.
+* `SamsaBuffer.byteOffset`  
+The offset from the start of the underlying `ArrayBuffer` to the start of the `SamsaBuffer`.
 
 * `SamsaBuffer.byteLength`  
 The length of the `SamsaBuffer` buffer in bytes. This may be less than the length of the underlying `ArrayBuffer`.
@@ -28,7 +28,7 @@ The length of the `SamsaBuffer` buffer in bytes. This may be less than the lengt
 ### Instance properties
 
 * `SamsaBuffer.p`  
-The offset from the start of the `SamsaBuffer`, where reading and writing will next take place. Attempting to read or write when `p` is not in the range [0, `SamsaBuffer.byteLength` - 1] is an error. Clients may update it directly, but there are also tell(), seek() and seekr() methods.
+The offset from the start of the `SamsaBuffer`, where reading and writing will next take place. Attempting to read or write when `p` is not in the range [0, `SamsaBuffer.byteLength` - 1] is an error. Clients may update it directly, but there are also tell(), seek() and seekr() methods. Note that `SamsaBuffer.byteOffset` + `SamsaBuffer.p` is always <= `SamsaBuffer.buffer.byteLength`.
 
 ### Instance methods
 
