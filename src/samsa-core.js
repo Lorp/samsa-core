@@ -2925,7 +2925,7 @@ class SamsaBuffer extends DataView {
 			if (numPoints < 0x80)
 				this.u8 = numPoints; // set length byte
 			else
-				this.u16 = numPoints | (GVAR_POINTS_ARE_WORDS << 8); // set length byte
+				this.u16 = numPoints | (GVAR_POINTS_ARE_WORDS << 8); // set length bit
 
 			// this method avoids the need to create arrays of runs
 			const u8PackedTell = this.byteOffset + this.tell();
