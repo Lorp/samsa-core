@@ -2645,7 +2645,6 @@ class SamsaBuffer extends DataView {
 		options.checkSums ??= true;
 		options.glyphCompression ??= true;
 
-		const startTime = performance.now();
 		const font = instance.font;
 		const numGlyphs = font.maxp.numGlyphs;
 		const tableListFiltered = font.tableList.filter(table => !["fvar", "gvar", "avar", "cvar", "HVAR", "VVAR", "MVAR", "STAT"].includes(table.tag)); // remove variable-specific tables
@@ -2744,10 +2743,6 @@ class SamsaBuffer extends DataView {
 			this.u32 = ((0xB1B0AFBA - checkSumTotal) + 0x100000000) % 0xffffffff;
 		}
 		this.seek(finalLength);
-
-		const endTime = performance.now();
-		console.log("Font encoding time: " + (endTime - startTime) + " ms");
-
 		return finalLength; // now the buffer "this" contains the binary font, we return the length to the client (finalLength <= this.byteLength)
 	}
 
