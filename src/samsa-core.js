@@ -4944,7 +4944,7 @@ SamsaInstance.prototype.glyphRunGSUB = function (inputRun, options={}) {
 
 				// get coverage for this lookup
 				if (subtable.coverageOffset) {
-					buf.seek(subtableOffset + coverageOffset);
+					buf.seek(subtableOffset + subtable.coverageOffset);
 					subtable.coverage = buf.decodeCoverage();
 				}
 			}
