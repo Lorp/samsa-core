@@ -1829,6 +1829,13 @@ class SamsaBuffer extends DataView {
 			this.setUint8(this.p++, num);
 	}
 
+	u8_arrayOfLength(count) { // we can’t use a getter as it needs an argument
+		const arr = [];
+		while (count--)
+			arr.push(this.getUint8(this.p++));
+		return arr;
+	}
+
 	set i8(num) {
 		this.setInt8(this.p++, num);
 	}
