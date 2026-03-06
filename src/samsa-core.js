@@ -1739,7 +1739,7 @@ class SamsaBuffer extends DataView {
 			value = code;
 		}
 		return value;
-		}
+	}
 
 	set i16(num) {
 		this.setInt16(this.p, num);
@@ -2099,6 +2099,7 @@ class SamsaBuffer extends DataView {
 
 		// empty glyph
 		if (byteLength === 0) {
+			// do nothing, empty glyph
 		}
 
 		// simple glyph
@@ -4193,37 +4194,47 @@ SamsaFont.prototype.itemVariationStoreInstantiate = function (ivs, tuple) {
 
 // process ItemVariationStore to get scalars for an instance (including avar2)
 // - the returned scalars[n] array contains a scalar for each region (therefore regions.length == scalars.length)
-//SamsaFont.prototype.getVariationScalars = function (regions, tuple) {
 SamsaFont.prototype.getVariationScalars = function (ivs, tuple) {
 	const scalars = [];
-	const regions = ivs.regions;
-	regions.forEach(region => { // for each region...
-		// ... go thru each of the axisCount linearRegions in the region
-		let S = 1;
-		for (let a=0; a < ivs.axisCount; a++) {
-			const [start, peak, end] = region[a];
-			if (peak !== 0) { // does the linearRegion participate in the calculation?
-				const v = tuple[a]; // v is the a’th normalized axis value from the tuple
-				if (v == 0) {
-					S = 0;
-					break; // zero scalar, which makes S=0, so quit loop (maybe this is more common than the v==peak case, so should be tested first)
-				}
-				else if (v !== peak) { // we could let the v==peak case fall through, but it’s common so worth testing first
-					const vMstart = v - start, vMend = v - end; // precalculating these speeds things up a bit
-					if (vMstart < 0 || vMend > 0) {
+
+	// ensure ivs.regions is an array... return with error otherwise
+	if (!ivs.regions || !Array.isArray(ivs.regions)) {
+		console.error("ERROR: ivs.regions is not an array.");
+		return null;
+	}
+	else if (tuple.length !== ivs.axisCount) {
+		console.error("ERROR: tuple length does not match ivs.axisCount.");
+		return null;
+	}
+	else {
+		ivs.regions.forEach(region => { // for each region...
+			// ... go thru each of the axisCount linearRegions in the region
+			let S = 1;
+			for (let a=0; a < ivs.axisCount; a++) {
+				const [start, peak, end] = region[a];
+				if (peak !== 0) { // does the linearRegion participate in the calculation?
+					const v = tuple[a]; // v is the a’th normalized axis value from the tuple
+					if (v === 0) {
 						S = 0;
 						break; // zero scalar, which makes S=0, so quit loop (maybe this is more common than the v==peak case, so should be tested first)
 					}
-					else if (v < peak)
-						S *= vMstart / (peak - start);
-					else if (v > peak) // because we already tested all other possibilities (including v==peak) we could remove this test and just have "else"
-						S *= vMend / (peak - end);
+					else if (v !== peak) { // we could let the v==peak case fall through, but it’s common so worth testing first
+						const vMstart = v - start, vMend = v - end; // precalculating these speeds things up a bit
+						if (vMstart < 0 || vMend > 0) {
+							S = 0;
+							break; // zero scalar, which makes S=0, so quit loop (maybe this is more common than the v==peak case, so should be tested first)
+						}
+						else if (v < peak)
+							S *= vMstart / (peak - start);
+						else // (v > peak) // we already tested all other possibilities so we don’t need a test here
+							S *= vMend / (peak - end);
+					}
 				}
 			}
-		}
-		scalars.push(S);
-	});
-	return scalars;
+			scalars.push(S);
+		});
+		return scalars;
+	}
 }
 
 SamsaFont.prototype.loadGlyphById = function (glyphId, cache = true) {
