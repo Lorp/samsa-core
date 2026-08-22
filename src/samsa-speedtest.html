@@ -6,14 +6,14 @@
 	<title>Samsa speed test</title>
 	<script type="module" src="samsa-core.js"></script>
 
-</head>
+	</head>
 
 <script type="module">
 /*
 
 	Samsa Speed Test
 
-	Given a variable font, Samsa Speed Test generates static instance binaries at random axis locations in memory and reports timings.
+	Given a variable font, Samsa Speed Test generates static instance binaries in memory at random axis locations, then reports timings.
 
 	Usage: Open in a browser
 
@@ -30,73 +30,107 @@
 
 import { SamsaFont, SamsaBuffer } from "./samsa-core.js";
 
-const urlParams = new URLSearchParams(window.location.search);
-const iterations = 1000 ?? parseInt(urlParams.get("iterations"));
-const fontFilename = urlParams.get("font") ?? "https://lorp.github.io/samsa/src/fonts/IBMPlexSansVar-Roman.ttf";
-const options = {
-	glyphCompression: urlParams.has("fast") ? false : true,
-	skipChecksum: urlParams.has("fast") ? true : false
-};
+function speedTest (fontFilename, iterations, options) {
 
-document.querySelector("#iteration-total").textContent = iterations;
 
-if (fontFilename) {
+	if (fontFilename) {
 
-	// fetch the remote file into a buffer
-	console.log(`Fetching font file: fonts/${fontFilename}`);
-	fetch(fontFilename)
-		.then(response => response.arrayBuffer())
-		.then(buffer => {
-			const sBuffer0 = new SamsaBuffer(buffer);
-			const sBuffer1 = new SamsaBuffer(new ArrayBuffer(buffer.byteLength * 2));
-			const font = new SamsaFont(sBuffer0);
+		// fetch the remote file into a buffer
+		console.log(`Fetching font file: fonts/${fontFilename}`);
+		fetch(fontFilename)
+			.then(response => response.arrayBuffer())
+			.then(buffer => {
+				const sBuffer0 = new SamsaBuffer(buffer);
+				const sBuffer1 = new SamsaBuffer(new ArrayBuffer(buffer.byteLength * 2));
+				const font = new SamsaFont(sBuffer0);
 
-			document.querySelector("#font-file").textContent = fontFilename;
-			console.log(`Font file: ${fontFilename} (${sBuffer0.byteLength} bytes, ${font.maxp.numGlyphs} glyphs)`);
-			console.log(font);
+				// document.querySelector("#font-file").textContent = fontFilename;
+				console.log(`Font file: ${fontFilename} (${sBuffer0.byteLength} bytes, ${font.maxp.numGlyphs} glyphs)`);
+				console.log(font);
 
-			// start performance timer
-			const startTime = performance.now();
+				// start performance timer
+				const startTime = performance.now();
 
-			for (let i = 0; i < iterations; i++) {
+				for (let i = 0; i < iterations; i++) {
 
-				const fvs = {};
-				for (const axis of font.fvar.axes)
-					fvs[axis.axisTag] = Math.random() * (axis.maxValue - axis.minValue) + axis.minValue;
+					const fvs = {};
+					for (const axis of font.fvar.axes)
+						fvs[axis.axisTag] = Math.random() * (axis.maxValue - axis.minValue) + axis.minValue;
 
-				const instance = font.instance(fvs);
-				const fontLength = sBuffer1.encodeInstance(instance, options); // encode the SamsaInstance as a TrueType font in the buffer
-			}
+					const instance = font.instance(fvs);
+					const fontLength = sBuffer1.encodeInstance(instance, options); // encode the SamsaInstance as a TrueType font in the buffer
+				}
 
-			const endTime = performance.now();
+				const endTime = performance.now();
 
-			// show results in the console and in the HTML page
-			document.querySelector("#iteration-counter").textContent = iterations;
-			console.log(`Total time: ${endTime - startTime} ms`);
-			document.querySelector("#total-time").textContent = (endTime - startTime).toFixed(2);
-			console.log(`Average time per iteration: ${(endTime - startTime) / iterations} ms`);
-			document.querySelector("#average-time").textContent = ((endTime - startTime) / iterations).toFixed(2);
-			console.log(`Iterations per second: ${iterations / ((endTime - startTime) / 1000)}`);
-			document.querySelector("#iterations-per-second").textContent = (iterations / ((endTime - startTime) / 1000)).toFixed(2);
+				// show results in the console and in the HTML page
+				document.querySelector("#iteration-counter").value = iterations;
 
-		})
-		.catch(error => {
-			console.error('Error fetching font file:', error);
-			document.body.innerHTML += (`<br>Error fetching font file: ${error}`);
-		});
+				console.log(`Total time: ${endTime - startTime} ms`);
+				document.querySelector("#total-time").value = (endTime - startTime).toFixed(2);
+				
+
+				console.log(`Average time per iteration: ${(endTime - startTime) / iterations} ms`);
+				document.querySelector("#average-time").value = ((endTime - startTime) / iterations).toFixed(2);
+				
+
+				console.log(`Iterations per second: ${iterations / ((endTime - startTime) / 1000)}`);
+				document.querySelector("#iterations-per-second").value = (iterations / ((endTime - startTime) / 1000)).toFixed(2);
+
+			})
+			.catch(error => {
+				console.error('Error fetching font file:', error);
+				document.body.innerHTML += (`<br>Error fetching font file: ${error}`);
+			})
+			.finally(() => {
+				document.querySelector("#run").disabled = false;
+			});
+
+	}
 
 }
+
+
+document.querySelector("#run").addEventListener("click", e => {
+
+	e.target.closest("button").disabled = true;
+	e.target.disabled = true;
+	// e.target.style.opacity = 0.1;
+	console.log(e.target)
+	console.log(e.target.disabled)
+
+	// console.log(document.querySelector("#run").matches(button:disabled"));
+	
+
+	const fontUrl = document.querySelector("#font-url").value;
+	const iterations = parseInt(document.querySelector("#iteration-total").value);
+	const fast = document.querySelector("#fast").checked;
+	const options = {
+		glyphCompression: fast ? false : true,
+		checksums: fast ? false : true,
+	};
+
+	console.log(options);
+
+	speedTest(fontUrl, iterations, options); // this is async because it contains fetch()
+
+});
+
+
+
 
 </script>
 
 <body>
 <h2>Samsa Speed Test</h2>
 
-<div>Font file: <span id="font-file">?</span></div>
-<div>Iterations completed: <span id="iteration-counter">0</span>/<span id="iteration-total">?</span></div>
-<div>Total time: <span id="total-time">?</span> ms</div>
-<div>Average time per iteration: <span id="average-time">?</span> ms</div>
-<div>Iterations per second: <span id="iterations-per-second">?</span></div>
+<div><input id="font-url" value="https://lorp.github.io/samsa/src/fonts/IBMPlexSansVar-Roman.ttf" style="width:40em;"> <button id="run">Run</button></div> 
+<div>Fast mode <input type="checkbox" id="fast"></div>
+<div>Iterations <input id="iteration-total" value="100"></div>
+<div>Iterations completed <input id="iteration-counter" readonly placeholder="?"></div>
+<div>Total time <input id="total-time" readonly placeholder="?"></div>
+<div>Average time per iteration <input id="average-time" readonly placeholder="?"> ms</div>
+<div>Iterations per second <input id="iterations-per-second" readonly placeholder="?"></div>
 
 </body>
 </html>
